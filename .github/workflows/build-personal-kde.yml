@@ -58,10 +58,13 @@ jobs:
       - name: Check desktop and accessory configuration
         run: |
           set -euo pipefail
-          for check in desktop-images firmware-options personal-kde; do
+          for check in desktop-images firmware-options personal-kde performance kernel-source; do
             nix eval --json --impure --option allow-import-from-derivation false \
               --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
           done
+
+      - name: Build and test charger helper before the kernel
+        run: nix build -L --no-link .#sheng-mipps-auth
 
       - name: Restore matching kernel closure from this fork or upstream
         env:
@@ -144,6 +147,25 @@ jobs:
           compression-level: 0
           path: kernel-artifacts/
 
+      - name: Verify selected production kernel and PM diagnostics
+        run: |
+          set -euo pipefail
+          # Reading the real kernel .config may build its generator. This is
+          # deliberately after the kernel build and runs only on native ARM64.
+          nix eval --json --impure --expr 'import ./tests/kernel-profile.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
+          nix build -L --no-link .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.src
+          source=$(nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.src.outPath)
+          test -f "$source/drivers/gpu/drm/msm/dsi/dsi_host.c"
+          test -d "$source/drivers/gpu/drm/msm/disp/dpu1"
+          test -f "$source/drivers/gpu/drm/panel/panel-novatek-nt36532e.c"
+          if grep -RE 'SHENG_(TRACE|PPS|SEQ|RD|PM|W |P |D |C:)' \
+            "$source/drivers/gpu/drm/msm/dsi" \
+            "$source/drivers/gpu/drm/msm/disp/dpu1" \
+            "$source/drivers/gpu/drm/panel/panel-novatek-nt36532e.c"; then
+            echo "Bring-up display instrumentation is still present in the production kernel source." >&2
+            exit 1
+          fi
+
       - name: Build and verify single-system U-Boot
         run: |
           set -euo pipefail
@@ -184,6 +206,8 @@ jobs:
             'Target root partition: userdata. Installation erases existing userdata.' \
             'Keyboard/pen helpers disabled; Flatpak and Flathub included.' \
             'Plasma on-screen keyboard selected by default for touch input.' \
+            'Production display path without added bring-up logging; ZSTD zram and basic file indexing.' \
+            'Charger helper re-entry/enqueue fixes and staged PM diagnostics included.' \
             'A successful build does not verify device suspend/resume or battery life.' \
             > personal-kde-artifacts/BUILD-INFO.txt
           (cd personal-kde-artifacts && sha256sum \

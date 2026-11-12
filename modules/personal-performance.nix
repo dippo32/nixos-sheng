@@ -1,0 +1,24 @@
+# Conservative personal-image defaults. These do not change CPU/GPU governors,
+# frequency limits, thermal protection, or the kernel's swappiness default.
+{ ... }:
+{
+  # The locked Debian sheng config (da1d2761dbc1) enables ZRAM=m, SWAP=y and
+  # ZRAM_BACKEND_ZSTD=y; its ZRAM_BACKEND_LZ4 is explicitly disabled.
+  # https://github.com/ianchb/debian-sheng/blob/da1d2761dbc1ccaea0122f8b0c2dce2d52edaeb2/sm8550.config
+  # memoryMax is bytes; memoryPercent describes the uncompressed swap capacity,
+  # not an upfront RAM reservation. Cap it at 2 GiB to limit this first candidate.
+  zramSwap = {
+    enable = true;
+    algorithm = "zstd";
+    memoryPercent = 25;
+    memoryMax = 2 * 1024 * 1024 * 1024;
+    priority = 100;
+  };
+
+  # Baloo 6.31's supported setting keeps file-name/metadata indexing while
+  # avoiding document-content extraction. A user's own settings take priority.
+  environment.etc."xdg/baloofilerc".text = ''
+    [General]
+    only basic indexing=true
+  '';
+}

@@ -1,7 +1,18 @@
 # Personal single-boot KDE candidate. Existing downloadable images keep their
 # defaults; this profile selects the owner's accessory and application needs.
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 {
+  imports = [ ./personal-performance.nix ];
+
+  boot.kernelPackages = lib.mkForce (
+    pkgs.linuxPackagesFor (
+      pkgs.shengKernel.override {
+        displayDiagnostics = false;
+        powerDiagnostics = true;
+      }
+    )
+  );
+
   services.shengFirmware.keyboard.enable = false;
   services.shengFirmware.pen.enable = false;
 

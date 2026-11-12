@@ -1,0 +1,49 @@
+--- a/xiaomi-mipps-auth
++++ b/xiaomi-mipps-auth
+@@ -610 +610,6 @@
+-        start_systemd_unit(SYSTEMD_UNIT)
++        try:
++            start_systemd_unit(SYSTEMD_UNIT)
++        except (OSError, subprocess.SubprocessError):
++            # A failed enqueue must not suppress later USB-online events.
++            write_state_file(USB_ONLINE_STATE_FILE, "0")
++            raise
+@@ -633,16 +638,7 @@
+-    state, _ = vdm_state(root)
+-    if auth_already_completed(root, state) and not args.force:
+-        print(f"sysfs={root}")
+-        enable_battery_auth(root)
+-        print("MiPPS auth sequence already completed")
+-        print_status(root)
+-        notify_completed_charge(root, NOTIFICATION_STATE_FILE)
+-        return
+-
+-    try:
+-        seed_index = args.seed_index if args.seed_index is not None else random.randrange(len(SEEDS))
+-        print(f"sysfs={root}")
+-        print(f"real_type={wait_real_type(root, args.timeout)}")
+-        print(f"seed_index={seed_index}")
+-
+-        # Reject unsupported sources before attempting a Type-C role swap.
++    try:
++        # Preserve fresh-attach type settling before classifying a zero PDO.
++        # Reuse the result instead of waiting a second time below.
++        real_type = wait_real_type(root, args.timeout)
++
++        # Completed handshakes must obey the same current-source check as
++        # fresh handshakes before either fuel gauge can be written.
+@@ -651,0 +648,14 @@
++
++        state, _ = vdm_state(root)
++        if auth_already_completed(root, state) and not args.force:
++            print(f"sysfs={root}")
++            enable_battery_auth(root)
++            print("MiPPS auth sequence already completed")
++            print_status(root)
++            notify_completed_charge(root, NOTIFICATION_STATE_FILE)
++            return
++
++        seed_index = args.seed_index if args.seed_index is not None else random.randrange(len(SEEDS))
++        print(f"sysfs={root}")
++        print(f"real_type={real_type}")
++        print(f"seed_index={seed_index}")

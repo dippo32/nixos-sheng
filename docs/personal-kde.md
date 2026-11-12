@@ -2,7 +2,7 @@
 
 This image targets a Xiaomi Pad 6S Pro 12.4 (`sheng`) owner who uses touch input
 and does not own the Xiaomi magnetic keyboard or Focus Pen. It is based on
-`c41bb12373b8979534e650d101d667c3c272af2e`, retains the locked Nixpkgs and kernel,
+`c41bb12373b8979534e650d101d667c3c272af2e`, retains the locked Nixpkgs and upstream kernel revision,
 and adds a separate `sheng-kde-personal` configuration. Existing single/dual,
 CLI, KDE and GNOME outputs retain their previous defaults.
 
@@ -27,6 +27,31 @@ CLI, KDE and GNOME outputs retain their previous defaults.
   short power-key press with suspend. KDE may manage the button while running.
 - `trace-cmd` and the read-only `sheng-power-report` command are included for
   device validation. No trace recording or suspend test runs automatically.
+- The personal kernel omits the added display bring-up register dumps, repeated
+  printk calls, extra panel power-mode reads, and lab-only noinit/noreset hooks.
+  It follows the pinned upstream display path. Shared touch-log and serial-buffer
+  adjustments remain. Other images retain the diagnostic kernel by default.
+- ZSTD zram uses at most 25% of RAM as uncompressed swap capacity, capped at
+  2 GiB; memory is allocated as compressed pages are actually used. This is
+  intended to help under memory pressure, not a measured FPS or temperature gain.
+- Baloo indexes names and metadata, with document-content extraction disabled
+  by default. Users can change the indexing preference in KDE.
+- `CONFIG_PM_DEBUG` and `CONFIG_PM_SLEEP_DEBUG` expose staged suspend tests and
+  statistics for later diagnosis. Test mode remains `none` until manually changed.
+
+## Charging helper corrections
+
+Two error paths are fixed in the pinned MiPPS userspace helper. A cached
+completed-handshake state no longer bypasses the current-source PDO check;
+ordinary unsupported PC USB sources are skipped before fuel-gauge writes or
+role changes. Type classification is still awaited once before that check.
+Also, a failed systemd enqueue clears the online debounce so later events can
+retry. Nine mocked regression tests cover unsupported and valid fresh/completed
+authentication, negotiation ordering, CLI exit status and enqueue recovery.
+
+These changes do not establish actual charging power or repair a blocked
+kernel Type-C role write. The current service timeout and protocol retries are
+retained. Voltage/current limits and thermal controls are not modified.
 
 Flathub descriptor retrieved from
 <https://dl.flathub.org/repo/flathub.flatpakrepo> on 2026-11-12, SHA256
@@ -61,9 +86,14 @@ before importing, and exports a kernel artifact for future builds. If no cache
 is accessible, it builds the locked source on ARM64.
 
 Local checks cover the existing desktop images, all four keyboard/pen switch
-combinations, the personal profile, and an actual offline Flatpak remote import
+combinations, the personal profile, zram/indexing defaults, kernel source
+generation, charger regressions, and an actual offline Flatpak remote import
 in isolated temporary directories. No user's installed Flatpak applications or
 remotes are changed by that test.
+The real effective kernel profile is evaluated after the native ARM kernel
+build, because reading its generated configuration uses import-from-derivation.
+CI also checks that production display sources contain no added register-dump
+instrumentation and that both PM diagnostic options are present.
 
 ## Sleep and remaining validation
 

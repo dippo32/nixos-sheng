@@ -8,6 +8,12 @@ assert c.sheng.rootfs.partlabel == "userdata";
 assert c.networking.hostName == "sheng-kde-personal";
 assert c.services.desktopManager.plasma6.enable;
 assert c.services.displayManager.autoLogin.user == (import ../image-settings.nix).userName;
+assert c.services.displayManager.sddm.enable;
+assert c.services.displayManager.sddm.wayland.enable;
+assert c.services.displayManager.sddm.wayland.compositor == "kwin";
+assert
+  builtins.match ".*--inputmethod .*/bin/plasma-keyboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
+  != null;
 assert c.services.pipewire.enable && c.services.pipewire.pulse.enable;
 assert !c.services.shengFirmware.keyboard.enable;
 assert !c.services.shengFirmware.pen.enable;
@@ -22,6 +28,8 @@ assert
     c.environment.etc."xdg/kwinrc".text != null;
 assert builtins.elem "flatpak" packages;
 assert builtins.elem "discover" packages;
+assert builtins.elem "plasma-keyboard" packages;
+assert builtins.elem "qtvirtualkeyboard" packages;
 assert builtins.elem "xdg-desktop-portal-kde" (
   builtins.map (p: p.pname or p.name) c.xdg.portal.extraPortals
 );

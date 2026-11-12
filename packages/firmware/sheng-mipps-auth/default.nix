@@ -27,8 +27,19 @@ stdenvNoCC.mkDerivation {
   ];
   # A PC USB source has no authentication PDO. Reject it before requesting
   # a host data role, whose synchronous sysfs write can exceed the unit timeout.
-  patches = [ ./skip-unsupported-before-role-swap.patch ];
+  patches = [
+    ./skip-unsupported-before-role-swap.patch
+    ./guard-auth-reentry.patch
+  ];
   buildInputs = [ glib ];
+  nativeCheckInputs = [ python3 ];
+
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    python3 ${./tests/test_auth.py} ./xiaomi-mipps-auth
+    runHook postCheck
+  '';
 
   dontBuild = true;
   dontConfigure = true;
@@ -57,7 +68,7 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "Xiaomi MiPPS charger authentication daemon (prebuilt, no source available)";
+    description = "Xiaomi MiPPS charger authentication helper";
     license = lib.licenses.unfree;
     platforms = [ "aarch64-linux" ];
   };
