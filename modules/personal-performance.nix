@@ -21,4 +21,14 @@
     [General]
     only basic indexing=true
   '';
+
+  # KWin 6.8.2's supported global animation setting; 0.75 is also an official
+  # slider value. Default transition durations become 25% shorter, with effects
+  # still enabled and user preferences able to override this system default.
+  # https://github.com/KDE/kwin/blob/v6.8.2/src/kcms/animations/animationskdeglobalssettings.kcfg
+  # This is a timing preference; runtime smoothness still needs measurement.
+  environment.etc."xdg/kdeglobals".text = ''
+    [KDE]
+    AnimationDurationFactor=0.75
+  '';
 }

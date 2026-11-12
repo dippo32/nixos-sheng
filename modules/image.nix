@@ -14,7 +14,7 @@
 let
   cfg = config.sheng.rootfs;
 
-  rawImage = pkgs.callPackage "${modulesPath}/../lib/make-ext4-fs.nix" {
+  rawImageBase = pkgs.callPackage "${modulesPath}/../lib/make-ext4-fs.nix" {
     storePaths = [ config.system.build.toplevel ];
     volumeLabel = cfg.partlabel;
     populateImageCommands = ''
@@ -34,8 +34,55 @@ let
       # A mutable copy, so the device can rebuild without a host.
       mkdir -p ./files/etc/nixos
       cp -r --no-preserve=mode,ownership ${self}/. ./files/etc/nixos/
+    ''
+    + lib.optionalString (cfg.privateProvisioningReserveMiB > 0) ''
+      # Its apparent size contributes to make-ext4-fs's initial size estimate.
+      # No private credentials or application payloads are present in CI.
+      mkdir -p ./files/var/lib/sheng-private
+      truncate -s ${toString cfg.privateProvisioningReserveMiB}M \
+        ./files/var/lib/sheng-private/.provisioning-reserve
     '';
   };
+
+  rawImage =
+    if cfg.privateProvisioningReserveMiB == 0 then
+      rawImageBase
+    else
+      rawImageBase.overrideAttrs (
+        old:
+        let
+          shrink = "resize2fs -M $img";
+          grow = "resize2fs $img $new_size";
+          matchesOnce = needle: builtins.length (lib.splitString needle old.buildCommand) == 2;
+        in
+        # Fail closed if the locked builder changes. Preserve the filesystem
+        # created by mkfs, avoiding the shrink/grow cycle and its bitmap issue.
+        assert lib.assertMsg (
+          matchesOnce shrink && matchesOnce grow
+        ) "The locked make-ext4-fs shrink commands changed; review private provisioning reserve handling.";
+        {
+          buildCommand =
+            builtins.replaceStrings
+              [ shrink grow ]
+              [
+                ": # Preserve initial filesystem space for private provisioning"
+                ": # No build-time filesystem growth"
+              ]
+              old.buildCommand
+            + ''
+              faketime -f '1970-01-01 00:00:01' debugfs -w \
+                -R 'rm /var/lib/sheng-private/.provisioning-reserve' "$out"
+              e2fsck -fn "$out"
+              free_bytes=$(dumpe2fs -h "$out" 2>/dev/null | awk -F: \
+                '/^Free blocks:/{free=$2} /^Block size:/{size=$2} END{printf "%.0f",free*size}')
+              required_bytes=${toString (cfg.privateProvisioningReserveMiB * 1024 * 1024)}
+              if [ "$free_bytes" -lt "$required_bytes" ]; then
+                echo "Image has insufficient free space for private provisioning: $free_bytes bytes" >&2
+                exit 1
+              fi
+            '';
+        }
+      );
 in
 {
   options.sheng.rootfs = {
@@ -73,9 +120,25 @@ in
         consumes it and it costs imageSize bytes per fetch.
       '';
     };
+
+    privateProvisioningReserveMiB = lib.mkOption {
+      type = lib.types.addCheck lib.types.int (n: n >= 0 && n <= 16384);
+      default = 0;
+      description = ''
+        Free space reserved for private local credential/application injection.
+        Nonzero values preserve the initial mkfs size instead of shrinking it.
+        Public builds contain no private provisioning data.
+      '';
+    };
   };
 
   config = {
+    assertions = [
+      {
+        assertion = cfg.privateProvisioningReserveMiB == 0 || cfg.imageSize == null;
+        message = "Private provisioning reserve requires automatic image sizing; do not resize the image at build time.";
+      }
+    ];
     system.build.shengImage =
       pkgs.runCommand "sheng-rootfs-images"
         {

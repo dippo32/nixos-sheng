@@ -7,7 +7,8 @@ in
 assert c.sheng.rootfs.partlabel == "userdata";
 assert c.networking.hostName == "sheng-kde-personal";
 assert c.services.desktopManager.plasma6.enable;
-assert c.services.displayManager.autoLogin.user == (import ../image-settings.nix).userName;
+assert c.sheng.desktop.userName == "dippo";
+assert !c.services.displayManager.autoLogin.enable;
 assert c.services.displayManager.sddm.enable;
 assert c.services.displayManager.sddm.wayland.enable;
 assert c.services.displayManager.sddm.wayland.compositor == "kwin";

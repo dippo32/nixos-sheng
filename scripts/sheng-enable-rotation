@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# libkscreen 6.8.2 serializes type=7 (Panel), connected, currentModeId,
+# optional enabled (only with Disable capability), and optional
+# autoRotatePolicy (only with AutoRotation capability):
+# https://github.com/KDE/libkscreen/blob/v6.8.2/src/configserializer.cpp#L61-L110
+# https://github.com/KDE/libkscreen/blob/v6.8.2/src/output.h#L86-L99
+# Its documented parser changes only the requested policy, retaining the
+# existing mode, scale, position, and rotation in the fetched configuration:
+# https://github.com/KDE/libkscreen/blob/v6.8.2/src/doctor/doctor.cpp#L581-L591
+
+internal_panel() {
+  jq -ce '
+    if type == "object" and (.outputs | type) == "array" then
+      [.outputs[]
+        | select(type == "object")
+        | select(.type == 7 and .connected == true)
+        | select((has("enabled") | not) or .enabled == true)
+        | select((.currentModeId | type) == "string" and .currentModeId != "")
+        | select((.name | type) == "string")
+        | select(.name | test("^(DSI|eDP|LVDS)(-[0-9]+)*$"; "i"))]
+      | select(length == 1)
+      | .[0]
+      | select(.autoRotatePolicy == 0 or .autoRotatePolicy == 1 or .autoRotatePolicy == 2)
+    else empty end
+  '
+}
+
+query_outputs() {
+  timeout --kill-after=1s 5s kscreen-doctor --json
+}
+
+# Cover the existing SSC startup delay without unbounded retries. The service
+# has an additional timeout; individual compositor calls are bounded as well.
+max_attempts=15
+last_failure="KWin or the internal display is not ready"
+for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+  if snapshot=$(query_outputs 2>/dev/null) && panel=$(internal_panel <<<"$snapshot" 2>/dev/null); then
+    name=$(jq -r .name <<<"$panel")
+    if [[ $(jq -r .autoRotatePolicy <<<"$panel") == 2 ]]; then
+      printf 'Automatic orientation enabled for %s.\n' "$name"
+      exit 0
+    fi
+
+    if timeout --kill-after=1s 5s kscreen-doctor "output.$name.autoRotatePolicy.always" >/dev/null 2>&1; then
+      # Doctor 6.8.2 can return zero after applyConfig reports failure. Verify
+      # the actual configuration instead of trusting that process status.
+      if snapshot=$(query_outputs 2>/dev/null) && panel=$(internal_panel <<<"$snapshot" 2>/dev/null) \
+        && jq -e --arg name "$name" '.name == $name and .autoRotatePolicy == 2' <<<"$panel" >/dev/null; then
+        printf 'Automatic orientation enabled for %s.\n' "$name"
+        exit 0
+      fi
+      last_failure="KWin did not retain the internal display rotation policy"
+    else
+      last_failure="KWin rejected the internal display rotation policy"
+    fi
+  else
+    last_failure="no unique active internal DSI/eDP/LVDS display with auto-rotation capability"
+  fi
+
+  if ((attempt < max_attempts)); then
+    sleep 3
+  fi
+done
+
+printf 'Automatic orientation was not configured: %s (after %d attempts).\n' "$last_failure" "$max_attempts" >&2
+exit 1

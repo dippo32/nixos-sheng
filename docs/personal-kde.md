@@ -1,139 +1,109 @@
-# Personal KDE single-boot candidate
+# Personal KDE single-boot image
 
-This image targets a Xiaomi Pad 6S Pro 12.4 (`sheng`) owner who uses touch input
-and does not own the Xiaomi magnetic keyboard or Focus Pen. It is based on
-`c41bb12373b8979534e650d101d667c3c272af2e`, retains the locked Nixpkgs and upstream kernel revision,
-and adds a separate `sheng-kde-personal` configuration. Existing single/dual,
-CLI, KDE and GNOME outputs retain their previous defaults.
+Target: Xiaomi Pad 6S Pro 12.4 (`sheng`), Linux-only root on `userdata`.
+The locked Nixpkgs/kernel/firmware inputs are retained. Standard CLI, KDE,
+GNOME and dual-boot profiles keep their defaults; personal changes are separate.
 
-## Included changes
+## Personal desktop and identity
 
-- Keyboard authentication, fold-angle and microphone LED helpers are omitted.
-- Pen battery/status UI, automatic pairing helper and autostart are omitted.
-- THP touchscreen, audio, sensors, fingerprint, charging and general Bluetooth
-  support remain enabled. The shared THP input processor is still required for
-  the touchscreen; its low-level pen code is not removed from the driver.
-- The bring-up USB serial console and its root getty are disabled. The pinned
-  kernel's `g_serial.enable=0` parameter prevents its built-in legacy gadget from
-  registering with the UDC at boot; disabling the getty alone would not do this.
-  This removes the debug gadget's claim on Type-C. Actual USB host/DP, charging
-  role changes and suspend still require hardware validation. Kernel support
-  is retained for later diagnosis; daily use relies on the touch desktop and Wi-Fi.
-  The existing diagnostics menu entry adds logging only; it does not re-enable
-  USB serial automatically. Serial diagnosis requires an explicit boot parameter
-  override or configuration change.
-- The installed Plasma Keyboard is selected as KWin's default input method
-  through `/etc/xdg/kwinrc`, so touch input has a keyboard in the logged-in
-  desktop as well as the SDDM greeter. A user's own KWin preferences take
-  precedence. Verify text entry on the actual tablet after boot.
-- Flatpak is installed and enabled. KDE's existing portal integration and its
-  Flatpak-enabled Discover application are retained.
-- Flathub is preconfigured system-wide using Flatpak's supported
-  `/etc/flatpak/remotes.d/flathub.flatpakrepo` mechanism. Its upstream signing key
-  is included. Registering this remote requires no first-boot network access;
-  browsing and downloading applications still require a connection.
-- The image selects `mem_sleep_default=s2idle` and permits logind to handle a
-  short power-key press with suspend. KDE may manage the button while running.
-- `trace-cmd` and the read-only `sheng-power-report` command are included for
-  device validation. No trace recording or suspend test runs automatically.
-- The personal kernel omits the added display bring-up register dumps, repeated
-  printk calls, extra panel power-mode reads, and lab-only noinit/noreset hooks.
-  It follows the pinned upstream display path. Shared touch-log and serial-buffer
-  adjustments remain. Other images retain the diagnostic kernel by default.
-- ZSTD zram uses at most 25% of RAM as uncompressed swap capacity, capped at
-  2 GiB; memory is allocated as compressed pages are actually used. This is
-  intended to help under memory pressure, not a measured FPS or temperature gain.
-- Baloo indexes names and metadata, with document-content extraction disabled
-  by default. Users can change the indexing preference in KDE.
-- `CONFIG_PM_DEBUG` and `CONFIG_PM_SLEEP_DEBUG` expose staged suspend tests and
-  statistics for later diagnosis. Test mode remains `none` until manually changed.
+- Login account `dippo`, UID 1000, display name **Dippo Shelan**.
+- GUI/TTY autologin is disabled; root's default password is locked.
+- Login uses `/var/lib/sheng-private/login.hash`, injected locally after CI.
+  Password/PIN content and its hash must never enter Git, Nix expressions,
+  the Nix store or public Actions artifacts. `users.mutableUsers=false` makes
+  that private file authoritative at activation; change it to change the PIN.
+- Plasma Keyboard is selected for SDDM and the user's Wayland session.
+- Firefox is omitted. LibreWolf is the default HTTP/HTTPS/HTML application.
+- LibreWolf, ChatGPT and Antigravity IDE are mutable per-user Flatpaks. The
+  private seed is prepared from signed Flathub ARM64 refs and official ARM64
+  vendor packages; the latter two use local, non-vendor Flatpak wrappers.
+  See [removable applications](removable-apps.md) for provenance and limits.
+- A first-boot service extracts the private seed as `dippo`, validates the refs,
+  and deletes the seed only after success. User uninstallation is not undone by
+  reboot or rebuild. Application payloads are not roots in the system Nix closure.
 
-## Charging helper corrections
+## Boot, rotation and responsiveness
 
-Two error paths are fixed in the pinned MiPPS userspace helper. A cached
-completed-handshake state no longer bypasses the current-source PDO check;
-ordinary unsupported PC USB sources are skipped before fuel-gauge writes or
-role changes. Type classification is still awaited once before that check.
-Also, a failed systemd enqueue clears the online debounce so later events can
-retry. Nine mocked regression tests cover unsupported and valid fresh/completed
-authentication, negotiation ordering, CLI exit status and enqueue recovery.
+`u-boot-personal` starts `bootlinux` directly without the generation menu.
+The internal current NixOS profile still exists. After boot, a guarded timer
+removes older system generation links only when booted/current/profile targets
+match. It does not prune user profiles or a pending boot selection; normal GC
+runs separately each week. Shell checks and Nix profile deletion are not one
+atomic transaction with an unrelated concurrent rebuild. Nix protects the selected
+profile and runtime GC roots; this is not a full health check or rollback guarantee.
 
-These changes do not establish actual charging power or repair a blocked
-kernel Type-C role write. The current service timeout and protocol retries are
-retained. Voltage/current limits and thermal controls are not modified.
+The personal Wayland session sets the active internal panel's auto-rotation
+policy to Always. It discovers the output, waits boundedly for SSC availability,
+changes no fixed orientation/mount matrix, and verifies the result. On the owner’s
+installed candidate, the sensor changed when held upright, and changing DSI-1
+from InTabletMode to Always was followed by user-confirmed display rotation.
+The new account's startup helper still needs device validation.
 
-The USB serial switch is implemented by the pinned kernel's
-[`g_serial` enable parameter](https://github.com/ianchb/sm8550-mainline/blob/1fb56e66091e71160d7c7f8e13b065d5b6ab8b8c/drivers/usb/gadget/legacy/serial.c#L258-L300).
-It is an existing upstream control, not an added DWC3 suspend patch.
+ZSTD zram uses at most 25% of RAM as uncompressed swap capacity, capped at 2 GiB.
+Baloo indexes names/metadata without document-content extraction. KDE animation
+duration defaults to 0.75 (user-overridable). The personal kernel omits extra
+bring-up display dumps/reads; shared touch-log and serial-buffer fixes remain.
+CPU/GPU governors, frequency limits and thermal protection are unchanged. No
+FPS, temperature or battery-life improvement has been measured.
 
-Flathub descriptor retrieved from
-<https://dl.flathub.org/repo/flathub.flatpakrepo> on 2026-11-12, SHA256
-`3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a`.
-Upstream documents static remotes in the
-[Flatpak reference](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak).
+Keyboard/pen accessory helpers are omitted; shared touchscreen, audio, sensors,
+fingerprint, charging and Bluetooth support remain. Low-level pen code shared
+with the touchscreen is retained.
 
-## Build and check
+## Power and remaining limits
+
+The personal kernel selects `s2idle` and includes manual PM diagnostics and
+`sheng-power-report`; no trace/suspend test is run automatically. The legacy USB
+serial gadget/getty are disabled through `g_serial.enable=0` on normal extlinux
+boot. The U-Boot rescue path has separate arguments and may re-enable serial.
+
+Two MiPPS helper error paths are corrected: current-source PDO validation before
+trusting cached authentication, and online-debounce recovery after enqueue
+failure. Nine mocked regressions verify these paths, not charging power or
+compatibility. The charging stack is otherwise retained from the installed candidate.
+
+**The user chose to retain the existing charging settings. No 40 W cap is applied.** The locked Xiaomi USB
+power-supply descriptor has no writable input-power/current setter. A future
+kernel RPC setter needs firmware ACK/error/readback validation and does not by
+itself establish a global watt cap across voltage negotiation or off-mode.
+Do not bypass thermal controls or pretend an unsupported sysfs write is a cap.
+
+The U-Boot charger-insert screen waits for Power with Linux stopped. Its own
+source says this is not low-power charging. The packaged Linux charger program
+is not enabled by adding an unverified boot flag. Low-power off-mode charging,
+actual charger watts, temperature, sleep/wake and overnight standby remain
+unverified. The [existing DWC3 freeze](power-validation.md) is not repaired by
+selecting s2idle, and PR #7 is not incorporated because its freeze/requeue handling
+is incomplete. Hibernate is not configured.
+
+## Public build and private assembly
 
 Configuration: `nixosConfigurations.sheng-kde-personal`.
-Image package on an ARM64 builder: `packages.aarch64-linux.nixos-kde-personal`.
-Root partition: `userdata`. Hostname/rebuild selector: `sheng-kde-personal`.
-Desktop username selection is shared with the other desktop images, default
-`nixos`.
+Image: `packages.aarch64-linux.nixos-kde-personal`.
+Boot image: `packages.aarch64-linux.u-boot-personal`.
 
-```sh
-# Evaluation only; does not install or activate anything.
-nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.networking.hostName
+The personal workflow builds on native ARM64, checks account/desktop/retention/
+rotation settings, charger regressions, real kernel configuration and boot/image
+formats. Exact-path/checksummed kernel artifacts can be restored from the personal
+branch or its earlier successful builds. Build success is separate from boot,
+login, application and peripheral tests.
 
-# Native ARM64 builder only, or a configured remote ARM64 builder.
-nix build -L .#nixos-kde-personal
-```
+The public artifact is an **unprovisioned base**. Its account is locked until
+private assembly injects the hash file. It contains no private PIN or proprietary
+application seed. A personal-only 8 GiB reserve preserves the initial mkfs-created
+filesystem size, skips the locked builder's shrink/grow commands, and checks
+actual free space. No fixed-size resize is used.
 
-The `build-personal-kde` workflow runs for pushes to the dedicated
-`codex/kde-personal-flatpak-power` branch, or by manual dispatch, and produces
-only this candidate and the matching single-system U-Boot image. Its artifact is named
-`sheng-kde-personal-flashable`; it includes revision/lock provenance and
-`SHA256SUMS`. A successful workflow is build evidence, not a hardware test.
-For unchanged kernels, the workflow checks matching kernel artifacts from this
-fork (including failed/cancelled runs with a completed kernel upload) and then
-the upstream repository. It verifies their path and checksum
-before importing, and exports a kernel artifact for future builds. If no cache
-is accessible, it builds the locked source on ARM64.
+Prepare a private seed with `scripts/prepare-personal-flatpaks.py`, then use
+`scripts/provision-private-image.py` with the base image, a 0600 hash file and
+0600 seed in a 0700 directory. It injects files with debugfs, verifies readback,
+owner/mode and free space, runs bounded filesystem checks, and creates a new
+checksummed sparse image. It never mounts, flashes or resizes the filesystem.
+Keep the resulting image and provenance local/private.
 
-Local checks cover the existing desktop images, all four keyboard/pen switch
-combinations, the personal profile, zram/indexing defaults, kernel source
-generation, charger regressions, and an actual offline Flatpak remote import
-in isolated temporary directories. No user's installed Flatpak applications or
-remotes are changed by that test.
-The real effective kernel profile is evaluated after the native ARM kernel
-build, because reading its generated configuration uses import-from-derivation.
-CI also checks that production display sources contain no added register-dump
-instrumentation and that both PM diagnostic options are present.
-
-## Sleep and remaining validation
-
-The existing [power record](power-validation.md) shows short successful s2idle
-tests but also DWC3 workqueue freezes after USB removal. Setting s2idle does not
-repair that driver issue, and this profile must not be advertised as stable
-overnight standby. Hibernate to disk is not configured.
-
-The owner also reports display glitches or a failure to wake after cover-close,
-charging errors and excessive warmth in the existing Linux installation. These
-reports still require kernel/service logs and sensor readings; this candidate
-does not claim those problems have been repaired. Fastboot's battery readings
-alone do not diagnose Linux charging or thermal behaviour.
-
-PR #7 was inspected but is not incorporated: it only requeues a suppressed USB
-role switch after a normal device resume; a suspend aborted during freezing may
-never call that resume path. It also does not serialize all pre-role-switch
-runtime-PM operations. No replacement patch is justified without the actual
-blocked stack and repeatable device evidence.
-
-Before installation, verify the built artifact and establish a recovery route.
-Installation is separate from preparing this configuration. Once device tests
-are authorized, collect `sudo sheng-power-report`, repeated sleep/wake with and
-without USB, actual sleep duration, screen/touch/audio/network recovery and
-longer battery measurements. Keep a known-good generation for rollback.
-
-After boot, check `flatpak remotes --system` and Discover for Flathub. Device
-login, screen keyboard, rotation, camera applications and fingerprint integration
-still require the [peripheral validation](peripheral-validation.md) checks.
+Before flashing, verify model/unlock/current slot, exact target partition and
+expanded sparse size, hashes and physical fastboot recovery. Installation erases
+`userdata`; it does not require erasing firmware, recovery or dtbo. Boot and
+application tests need the actual tablet. Check the new login and screen keyboard,
+Discover installation/removal, rotation/touch, charging, temperature and sleep.
+Use [peripheral validation](peripheral-validation.md) for other hardware claims.

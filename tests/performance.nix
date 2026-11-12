@@ -6,6 +6,7 @@ let
   base = flake.nixosConfigurations.sheng-kde.config;
   generator = c.services.zram-generator.settings.zram0;
   baloo = c.environment.etc."xdg/baloofilerc".text;
+  kdeglobals = c.environment.etc."xdg/kdeglobals".text;
 in
 assert c.zramSwap.enable;
 assert c.zramSwap.algorithm == "zstd";
@@ -19,6 +20,8 @@ assert generator.swap-priority == 100;
 assert c.systemd.services."systemd-zram-setup@".restartIfChanged == false;
 assert builtins.match ".*only basic indexing=true.*" baloo != null;
 assert builtins.match ".*Indexing-Enabled=false.*" baloo == null;
+assert kdeglobals == "[KDE]\nAnimationDurationFactor=0.75\n";
+assert !(base.environment.etc ? "xdg/kdeglobals");
 assert c.powerManagement.cpuFreqGovernor == base.powerManagement.cpuFreqGovernor;
 assert c.powerManagement.cpufreq.min == base.powerManagement.cpufreq.min;
 assert c.powerManagement.cpufreq.max == base.powerManagement.cpufreq.max;
@@ -36,6 +39,8 @@ assert !c.services.auto-cpufreq.enable;
   };
   fileNameIndexing = true;
   contentIndexing = false;
+  animationDurationFactor = 0.75;
+  standardKdeAnimationUnchanged = true;
   governorsAndLimitsUnchanged = true;
   runtimePerformanceMeasured = false;
 }

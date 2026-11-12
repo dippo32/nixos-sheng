@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Paths are fixed in the privileged program; tests use a rewritten copy.
+booted=/run/booted-system
+current=/run/current-system
+profile=/nix/var/nix/profiles/system
+
+snapshot_booted=$(readlink -e -- "$booted") || exit 0
+snapshot_current=$(readlink -e -- "$current") || exit 0
+snapshot_profile=$(readlink -e -- "$profile") || exit 0
+[[ "$snapshot_booted" == "$snapshot_current" && "$snapshot_booted" == "$snapshot_profile" ]] || exit 0
+
+# Resolve the *profile link itself* as well as its target. Keep generation
+# numbers created after this snapshot, even if a rebuild starts concurrently.
+profile_link=$(readlink -- "$profile") || exit 0
+profile_link=${profile_link##*/}
+[[ "$profile_link" =~ ^system-([0-9]+)-link$ ]] || exit 0
+active_id=${BASH_REMATCH[1]}
+[[ ${#active_id} -le 18 ]] || exit 0
+active_number=$((10#$active_id))
+
+declare -a ids=() targets=()
+for link in "${profile}"-*-link; do
+  [[ -L "$link" ]] || continue
+  suffix=${link#"${profile}"-}
+  [[ "$suffix" =~ ^([0-9]+)-link$ ]] || continue
+  id=${BASH_REMATCH[1]}
+  [[ ${#id} -le 18 ]] || continue
+  (( 10#$id < active_number )) || continue
+  target=$(readlink -e -- "$link") || continue
+  [[ "$target" != "$snapshot_booted" ]] || continue
+  ids+=("$id")
+  targets+=("$target")
+done
+
+for index in "${!ids[@]}"; do
+  id=${ids[$index]}
+  # Refuse cleanup if a rebuild, test activation, or boot selection changed.
+  [[ $(readlink -e -- "$booted") == "$snapshot_booted" ]] || exit 0
+  [[ $(readlink -e -- "$current") == "$snapshot_current" ]] || exit 0
+  [[ $(readlink -e -- "$profile") == "$snapshot_profile" ]] || exit 0
+  link_now=$(readlink -- "$profile") || exit 0
+  [[ ${link_now##*/} == "$profile_link" ]] || exit 0
+  [[ $(readlink -e -- "${profile}-${id}-link") == "${targets[$index]}" ]] || exit 0
+  nix-env --profile "$profile" --delete-generations "$id"
+done

@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+archive=/var/lib/sheng-private/flatpak-seed.tar.zst
+marker=/var/lib/sheng-private/flatpak-seeded
+target_home=/home/dippo
+share=$target_home/.local/share
+destination=$share/flatpak
+
+[[ ! -e "$marker" ]] || exit 0
+[[ -f "$archive" && ! -L "$archive" ]] || exit 0
+[[ -d "$target_home" && ! -L "$target_home" && $(stat -c '%u:%g' "$target_home") == 1000:100 ]] || {
+  echo 'Expected /home/dippo owned by uid 1000 and gid 100' >&2
+  exit 1
+}
+
+for dir in "$target_home/.local" "$share"; do
+  [[ ! -L "$dir" ]] || { echo "Refusing symlink directory: $dir" >&2; exit 1; }
+  if [[ ! -e "$dir" ]]; then
+    install -d -m 0700 -o 1000 -g 100 -- "$dir"
+  fi
+  [[ -d "$dir" && $(stat -c '%u' "$dir") == 1000 ]] || {
+    echo "Expected a user-owned directory: $dir" >&2; exit 1;
+  }
+done
+
+as_user() {
+  runuser -u dippo -- env -i USER=dippo LOGNAME=dippo \
+    XDG_DATA_HOME="$share" PATH="$PATH" "$@"
+}
+
+verify_refs() {
+  local install_dir=$1 refs ref expected found
+  refs=$(as_user env FLATPAK_USER_DIR="$install_dir" flatpak list --user --app --columns=ref)
+  for expected in \
+    'io.gitlab.librewolf-community/aarch64/stable' \
+    'io.github.dippo32.ChatGPT/aarch64/stable' \
+    'io.github.dippo32.AntigravityIDE/aarch64/stable'; do
+    found=0
+    while IFS= read -r ref; do
+      if [[ "$ref" == "$expected" ]]; then
+        found=1
+      fi
+    done <<< "$refs"
+    [[ "$found" == 1 ]] || { echo "Missing Flatpak ref: $expected" >&2; return 1; }
+  done
+}
+
+if [[ -e "$destination" || -L "$destination" ]]; then
+  # Preserve an existing user installation. Never overwrite or merge it.
+  [[ -d "$destination/repo" && ! -L "$destination" ]] || {
+    echo 'Existing Flatpak directory is incomplete; preserving it and the seed' >&2; exit 1;
+  }
+  verify_refs "$destination"
+else
+  # Validate the archive as root without giving the user access to its private
+  # parent. Member names and hardlinks must remain inside the archive prefix.
+  # Absolute symlink targets can be legitimate Flatpak/OSTree leaf data.
+  exec 3<"$archive"
+  needed_bytes=$(zstd -dc <&3 | python3 -c '
+import posixpath, sys, tarfile
+prefix = "home/dippo/.local/share/flatpak"
+def inside(path):
+    return path == prefix or path.startswith(prefix + "/")
+entries = {}
+content_bytes = 0
+symlinks = set()
+hardlinks = {}
+def symlink_ancestor(path, include_self=False):
+    if include_self and path in symlinks:
+        return path
+    parent = posixpath.dirname(path)
+    while inside(parent):
+        if parent in symlinks:
+            return parent
+        parent = posixpath.dirname(parent)
+    return None
+try:
+    with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as archive:
+        for member in archive:
+            name = member.name.rstrip("/")
+            if (not name or name.startswith("/") or "\\" in name
+                or any(part in ("", ".", "..") for part in name.split("/"))
+                or any(ord(c) < 32 for c in name) or not inside(name)):
+                raise ValueError("invalid member path: " + repr(member.name))
+            if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+                raise ValueError("unsupported archive entry: " + repr(name))
+            if name in entries:
+                raise ValueError("duplicate archive entry: " + repr(name))
+            entries[name] = member.type
+            if member.isfile():
+                content_bytes += member.size
+            if member.issym() or member.islnk():
+                link = member.linkname
+                if not link or "\\" in link or any(ord(c) < 32 for c in link):
+                    raise ValueError("invalid link: " + repr(name))
+                if member.islnk():
+                    # Hardlink targets are archive-root relative and are not
+                    # permitted to escape, traverse symlinks, or name them.
+                    if (link.startswith("/") or any(part in ("", ".", "..") for part in link.split("/"))
+                        or not inside(link)):
+                        raise ValueError("invalid hardlink target: " + repr(name))
+                    hardlinks[name] = link
+                else:
+                    symlinks.add(name)
+                    if not link.startswith("/"):
+                        target = posixpath.normpath(posixpath.join(posixpath.dirname(name), link))
+                        if not inside(target):
+                            raise ValueError("relative symlink escapes seed: " + repr(name))
+    if not entries:
+        raise ValueError("empty seed archive")
+    # Check the whole archive after scanning, so a symlink appearing *after*
+    # a child entry is rejected just like a symlink appearing before it.
+    for name in entries:
+        if symlink_ancestor(name):
+            raise ValueError("archive member below symlink: " + repr(name))
+    for name, target in hardlinks.items():
+        visited = {name}
+        while True:
+            if target in visited:
+                raise ValueError("hardlink cycle: " + repr(name))
+            visited.add(target)
+            if symlink_ancestor(target, include_self=True):
+                raise ValueError("hardlink target is or traverses a symlink: " + repr(name))
+            if target not in entries:
+                raise ValueError("missing hardlink target: " + repr(name))
+            if target not in hardlinks:
+                if entries[target] not in (tarfile.REGTYPE, tarfile.AREGTYPE):
+                    raise ValueError("hardlink target is not a regular file: " + repr(name))
+                break
+            target = hardlinks[target]
+    # tarfile can stop at the end-of-archive blocks before the zstd stream
+    # is fully consumed; drain it so pipefail does not mistake SIGPIPE for a
+    # decompression failure on an otherwise valid archive.
+    while sys.stdin.buffer.read(1024 * 1024):
+        pass
+    print(content_bytes + 4096 * len(entries) + 256 * 1024 * 1024)
+except (tarfile.TarError, ValueError) as error:
+    print("Invalid Flatpak seed:", error, file=sys.stderr)
+    sys.exit(1)
+')
+  exec 3<&-
+  [[ "$needed_bytes" =~ ^[0-9]+$ ]] || exit 1
+  available_bytes=$(df -B1 --output=avail "$share" | tail -n1 | tr -d " ")
+  if [[ "$available_bytes" -lt "$needed_bytes" ]]; then
+    echo 'Insufficient space for initial apps; preserving seed for retry after filesystem growth' >&2
+    exit 1
+  fi
+
+  # A fresh staging directory makes failed extractions retryable without
+  # overwriting a user's current installation or changing existing ownership.
+  stage=$(as_user mktemp -d "$share/.flatpak-seed.XXXXXXXX")
+  trap 'as_user rm -rf -- "$stage"' EXIT
+  exec 3<"$archive"
+  as_user tar --zstd --extract --strip-components=5 --no-same-owner -C "$stage" <&3
+  exec 3<&-
+  verify_refs "$stage"
+  # -n avoids replacing an installation created while seeding was in progress.
+  as_user mv -T -n -- "$stage" "$destination"
+  [[ ! -e "$stage" ]] || { echo 'Flatpak directory appeared during seeding; preserving it' >&2; exit 1; }
+  trap - EXIT
+fi
+
+touch -- "$marker"
+rm -f -- "$archive"

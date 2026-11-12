@@ -4,14 +4,8 @@ on:
   # The first push can build this candidate before the workflow is on main.
   # Other branches and pull requests do not start this additional image build.
   push:
-    branches: [codex/kde-personal-flatpak-power]
+    branches: [codex/kde-personal-flatpak-power, codex/personal-dippo-apps]
   workflow_dispatch:
-    inputs:
-      desktop_username:
-        description: "Desktop login username (initial password remains nixos)"
-        required: false
-        default: nixos
-        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,17 +22,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Configure desktop image username
-        env:
-          DESKTOP_USERNAME: ${{ inputs.desktop_username || 'nixos' }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$DESKTOP_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,30}$ || "$DESKTOP_USERNAME" == root ]]; then
-            echo "Invalid desktop username: use 1-31 lowercase letters, digits, _ or -, starting with a letter or _. root is not allowed." >&2
-            exit 1
-          fi
-          printf '{ userName = "%s"; }\n' "$DESKTOP_USERNAME" > image-settings.nix
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -58,10 +41,14 @@ jobs:
       - name: Check desktop and accessory configuration
         run: |
           set -euo pipefail
-          for check in desktop-images firmware-options personal-kde performance kernel-source; do
+          for check in desktop-images firmware-options personal-kde performance kernel-source personal-account generation-retention personal-removable-apps personal-rotation; do
             nix eval --json --impure --option allow-import-from-derivation false \
               --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
           done
+          python3 tests/generation-retention.py
+          nix build --impure --no-link --expr '(import ./tests/personal-rotation.nix { flake = builtins.getFlake ("git+file://" + toString ./.); system = "aarch64-linux"; }).scriptTests'
+          nix shell --inputs-from . nixpkgs#android-tools nixpkgs#e2fsprogs nixpkgs#zstd \
+            -c python3 tests/private-image-provision.py
 
       - name: Build and test charger helper before the kernel
         run: nix build -L --no-link .#sheng-mipps-auth
@@ -83,17 +70,21 @@ jobs:
           for repository in "${repositories[@]}"; do
             if [ "$repository" = "$GITHUB_REPOSITORY" ]; then
               workflow=build-personal-kde.yml
-              branch=$GITHUB_REF_NAME
+              branches=("$GITHUB_REF_NAME")
+              if [ "$GITHUB_REF_NAME" != codex/kde-personal-flatpak-power ]; then
+                branches+=(codex/kde-personal-flatpak-power)
+              fi
               # Prefer a successful personal build. Failed/cancelled image
               # builds can still contain a finalized kernel from the earlier
               # upload step. Path/checksum checks below remain mandatory.
               statuses=(success failure cancelled)
             else
               workflow=build.yml
-              branch=main
+              branches=(main)
               statuses=(success)
             fi
-            for status in "${statuses[@]}"; do
+            for branch in "${branches[@]}"; do
+             for status in "${statuses[@]}"; do
               if ! previous=$(gh run list --repo "$repository" --workflow "$workflow" --branch "$branch" --event push --status "$status" --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
                 echo "Kernel artifact discovery unavailable in $repository ($status)."
                 continue
@@ -123,6 +114,7 @@ jobs:
               nix path-info "$kernel" >/dev/null
               echo "Restored matching kernel closure from $repository run $previous."
               exit 0
+             done
             done
           done
           echo "No matching accessible kernel closure; building from locked source on ARM64."
@@ -170,7 +162,7 @@ jobs:
       - name: Build and verify single-system U-Boot
         run: |
           set -euo pipefail
-          nix build -L .#u-boot -o result-uboot
+          nix build -L .#u-boot-personal -o result-uboot
           test -f result-uboot/boot.img
           size=$(stat -L -c %s result-uboot/boot.img)
           test "$size" -gt 0
@@ -210,6 +202,11 @@ jobs:
             'Production display path without added bring-up logging; ZSTD zram and basic file indexing.' \
             'Charger helper re-entry/enqueue fixes and staged PM diagnostics included.' \
             'Bring-up USB serial gadget disabled at boot; actual Type-C roles require device testing.' \
+            'Direct-boot U-Boot; older system generation links are pruned after matching booted/current/profile checks.' \
+            'Account: dippo / Dippo Shelan. Login is locked until private local credential provisioning.' \
+            'Firefox omitted; mutable user Flatpaks are injected privately after this public build.' \
+            'THIS IS AN UNPROVISIONED BASE. Do not flash before private credential/app assembly.' \
+            'Charging settings remain unchanged from the installed candidate.' \
             'A successful build does not verify device suspend/resume or battery life.' \
             > personal-kde-artifacts/BUILD-INFO.txt
           (cd personal-kde-artifacts && sha256sum \

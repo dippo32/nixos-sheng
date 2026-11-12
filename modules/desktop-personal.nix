@@ -2,7 +2,15 @@
 # defaults; this profile selects the owner's accessory and application needs.
 { lib, pkgs, ... }:
 {
-  imports = [ ./personal-performance.nix ];
+  imports = [
+    ./personal-performance.nix
+    ./personal-generation-retention.nix
+    ./personal-account.nix
+    ./personal-removable-apps.nix
+    ./personal-rotation.nix
+  ];
+
+  sheng.rootfs.privateProvisioningReserveMiB = 8192;
 
   boot.kernelPackages = lib.mkForce (
     pkgs.linuxPackagesFor (
