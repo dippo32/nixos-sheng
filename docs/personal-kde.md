@@ -13,6 +13,10 @@ CLI, KDE and GNOME outputs retain their previous defaults.
 - THP touchscreen, audio, sensors, fingerprint, charging and general Bluetooth
   support remain enabled. The shared THP input processor is still required for
   the touchscreen; its low-level pen code is not removed from the driver.
+- The installed Plasma Keyboard is selected as KWin's default input method
+  through `/etc/xdg/kwinrc`, so touch input has a keyboard in the logged-in
+  desktop as well as the SDDM greeter. A user's own KWin preferences take
+  precedence. Verify text entry on the actual tablet after boot.
 - Flatpak is installed and enabled. KDE's existing portal integration and its
   Flatpak-enabled Discover application are retained.
 - Flathub is preconfigured system-wide using Flatpak's supported
@@ -51,6 +55,10 @@ The `build-personal-kde` workflow runs for pushes to the dedicated
 only this candidate and the matching single-system U-Boot image. Its artifact is named
 `sheng-kde-personal-flashable`; it includes revision/lock provenance and
 `SHA256SUMS`. A successful workflow is build evidence, not a hardware test.
+For unchanged kernels, the workflow checks matching kernel artifacts from this
+fork and then the upstream repository. It verifies their path and checksum
+before importing, and exports a kernel artifact for future builds. If no cache
+is accessible, it builds the locked source on ARM64.
 
 Local checks cover the existing desktop images, all four keyboard/pen switch
 combinations, the personal profile, and an actual offline Flatpak remote import
@@ -63,6 +71,12 @@ The existing [power record](power-validation.md) shows short successful s2idle
 tests but also DWC3 workqueue freezes after USB removal. Setting s2idle does not
 repair that driver issue, and this profile must not be advertised as stable
 overnight standby. Hibernate to disk is not configured.
+
+The owner also reports display glitches or a failure to wake after cover-close,
+charging errors and excessive warmth in the existing Linux installation. These
+reports still require kernel/service logs and sensor readings; this candidate
+does not claim those problems have been repaired. Fastboot's battery readings
+alone do not diagnose Linux charging or thermal behaviour.
 
 PR #7 was inspected but is not incorporated: it only requeues a suppressed USB
 role switch after a normal device resume; a suspend aborted during freezing may

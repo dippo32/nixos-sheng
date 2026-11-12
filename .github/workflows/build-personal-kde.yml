@@ -63,7 +63,7 @@ jobs:
               --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
           done
 
-      - name: Restore matching kernel closure from a successful main build
+      - name: Restore matching kernel closure from this fork or upstream
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -73,21 +73,76 @@ jobs:
             echo "The selected kernel is already in the store."
             exit 0
           fi
-          if ! previous=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
-            echo "Kernel artifact discovery unavailable; building from locked source."
-            exit 0
+          repositories=("$GITHUB_REPOSITORY")
+          if [ "$GITHUB_REPOSITORY" != Murkiness4095/nixos-sheng ]; then
+            repositories+=(Murkiness4095/nixos-sheng)
           fi
-          if [ -z "$previous" ] || ! gh run download "$previous" --repo "$GITHUB_REPOSITORY" --name sheng-kernel-closure --dir seed-kernel; then
-            echo "No previous kernel artifact; building from locked source."
-            exit 0
-          fi
-          if [ ! -f seed-kernel/kernel-path.txt ] || [ "$(cat seed-kernel/kernel-path.txt)" != "$kernel" ]; then
-            echo "The previous kernel does not match this configuration; building from locked source."
-            exit 0
-          fi
-          (cd seed-kernel && sha256sum -c SHA256SUMS)
-          zstd -dc seed-kernel/sheng-kernel-closure.nar.zst | sudo "$(command -v nix-store)" --import | tee seed-kernel/imported-paths.txt >/dev/null
-          nix path-info "$kernel" >/dev/null
+          for repository in "${repositories[@]}"; do
+            if [ "$repository" = "$GITHUB_REPOSITORY" ]; then
+              workflow=build-personal-kde.yml
+              branch=$GITHUB_REF_NAME
+              # Prefer a successful personal build. A failed image build may
+              # still contain the kernel uploaded by the earlier export step.
+              statuses=(success failure)
+            else
+              workflow=build.yml
+              branch=main
+              statuses=(success)
+            fi
+            for status in "${statuses[@]}"; do
+              if ! previous=$(gh run list --repo "$repository" --workflow "$workflow" --branch "$branch" --event push --status "$status" --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
+                echo "Kernel artifact discovery unavailable in $repository ($status)."
+                continue
+              fi
+              if [ -z "$previous" ]; then
+                continue
+              fi
+              if ! artifact=$(gh api "repos/$repository/actions/runs/$previous/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "sheng-kernel-closure" and .expired == false) | .id'); then
+                echo "Cannot inspect kernel artifacts in $repository run $previous."
+                continue
+              fi
+              if [ -z "$artifact" ]; then
+                echo "No kernel closure in $repository run $previous."
+                continue
+              fi
+              seed="seed-kernel/${repository//\//-}/$previous"
+              if ! gh run download "$previous" --repo "$repository" --name sheng-kernel-closure --dir "$seed"; then
+                echo "Kernel closure download unavailable in $repository run $previous."
+                continue
+              fi
+              if [ ! -f "$seed/kernel-path.txt" ] || [ "$(cat "$seed/kernel-path.txt")" != "$kernel" ]; then
+                echo "Kernel closure in $repository run $previous does not match this configuration."
+                continue
+              fi
+              (cd "$seed" && sha256sum -c SHA256SUMS)
+              zstd -dc "$seed/sheng-kernel-closure.nar.zst" | sudo "$(command -v nix-store)" --import | tee "$seed/imported-paths.txt" >/dev/null
+              nix path-info "$kernel" >/dev/null
+              echo "Restored matching kernel closure from $repository run $previous."
+              exit 0
+            done
+          done
+          echo "No matching accessible kernel closure; building from locked source on ARM64."
+
+      - name: Build and export selected kernel closure
+        run: |
+          set -euo pipefail
+          nix build -L .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel -o result-kernel
+          mkdir -p kernel-artifacts
+          nix path-info -r ./result-kernel > kernel-artifacts/store-paths.txt
+          mapfile -t store_paths < kernel-artifacts/store-paths.txt
+          nix-store --export "${store_paths[@]}" | zstd -T0 -3 -o kernel-artifacts/sheng-kernel-closure.nar.zst
+          nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.outPath > kernel-artifacts/kernel-path.txt
+          git rev-parse HEAD > kernel-artifacts/revision.txt
+          cp flake.lock kernel-artifacts/flake.lock
+          (cd kernel-artifacts && sha256sum sheng-kernel-closure.nar.zst > SHA256SUMS)
+
+      - name: Upload kernel closure before building the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-kernel-closure
+          if-no-files-found: error
+          compression-level: 0
+          path: kernel-artifacts/
 
       - name: Build and verify single-system U-Boot
         run: |
@@ -128,6 +183,7 @@ jobs:
             'Xiaomi Pad 6S Pro (sheng): personal KDE single-system candidate.' \
             'Target root partition: userdata. Installation erases existing userdata.' \
             'Keyboard/pen helpers disabled; Flatpak and Flathub included.' \
+            'Plasma on-screen keyboard selected by default for touch input.' \
             'A successful build does not verify device suspend/resume or battery life.' \
             > personal-kde-artifacts/BUILD-INFO.txt
           (cd personal-kde-artifacts && sha256sum \

@@ -17,6 +17,9 @@ assert !(c.environment.etc ? "xdg/autostart/xiaomi-pen-status.desktop");
 assert c.services.shengFirmware.enable;
 assert c.services.flatpak.enable;
 assert c.xdg.portal.enable;
+assert
+  builtins.match ".*InputMethod=.*/share/applications/org.kde.plasma.keyboard.desktop.*"
+    c.environment.etc."xdg/kwinrc".text != null;
 assert builtins.elem "flatpak" packages;
 assert builtins.elem "discover" packages;
 assert builtins.elem "xdg-desktop-portal-kde" (
@@ -33,5 +36,6 @@ assert builtins.match ".*GPGKey=.+" remote != null;
   flathub = true;
   keyboard = c.services.shengFirmware.keyboard.enable;
   pen = c.services.shengFirmware.pen.enable;
+  touchKeyboardDefault = true;
   sleepCandidate = "s2idle; hardware validation required";
 }
