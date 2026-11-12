@@ -9,6 +9,7 @@ import argparse
 import datetime
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -58,6 +59,18 @@ PREBUILD_LOADERS = {
     "serialport/node_modules/@serialport/bindings-cpp/node_modules/node-gyp-build/index.js": "a7ed0d5ae218a19bdbdf15a590d0893790ddf536313b66a787554693cfaae078",
     "serialport/node_modules/@serialport/bindings-cpp/node_modules/node-gyp-build/node-gyp-build.js": "134f0585f7c665db89f332a379158c6f113274422e42aaf54e0aa9d5ac37f577",
 }
+# Official Debian trixie ARM64 download pages supply these package checksums:
+# https://packages.debian.org/trixie/arm64/PACKAGE/download
+# ChatGPT's Debian control explicitly requires esys/mu/device; sys is the
+# recursive ELF dependency of esys. Never copy arbitrary host libraries.
+TSS2_VERSION = "4.1.3-1.2"
+TSS2_PACKAGES = {
+    "libtss2-esys-3.0.2-0t64": "80d442295d7ac09b5550a947e9f040fe242cf41489147c4d02487b516e1d2de8",
+    "libtss2-mu-4.0.1-0t64": "698134f2dd54a966f22e6b6ca56e98bdd32d05b8d667c916c8d04c50918e6644",
+    "libtss2-sys1t64": "3a16f52bd797c577b96d9b9ffa2e4a004ae8f426cd14c1709b66d3ee282b1d50",
+    "libtss2-tcti-device0t64": "c48c75de0b1d7ebcd31b63160dcdc7ef87664615860bb141d170676e5d293331",
+}
+TSS2_LIBRARY = re.compile(r"libtss2-(?:esys|mu|sys|tcti-device)\.so(?:\.[0-9]+)+")
 
 
 class PreparationError(Exception):
@@ -265,6 +278,148 @@ def validate_provenance(path, key, archive):
     return result
 
 
+def deb_data_archive(data):
+    """Read a checksum-pinned Debian ar container as data; run no package code."""
+    if not data.startswith(b"!<arch>\n"):
+        raise PreparationError("TSS2 input is not a Debian ar archive")
+    offset, result = 8, None
+    while offset < len(data):
+        header = data[offset:offset + 60]
+        if len(header) != 60 or header[58:] != b"`\n":
+            raise PreparationError("Malformed Debian archive header")
+        size = int(header[48:58])
+        name = header[:16].decode("ascii").strip().removesuffix("/")
+        content = data[offset + 60:offset + 60 + size]
+        if len(content) != size:
+            raise PreparationError("Truncated Debian archive member")
+        if name == "data.tar.xz":
+            if result is not None:
+                raise PreparationError("Duplicate Debian data archive")
+            result = content
+        offset += 60 + size + size % 2
+    if offset != len(data) or result is None:
+        raise PreparationError("Missing Debian data.tar.xz archive")
+    return result
+
+
+def validate_tss2_bundle(directory):
+    if directory.is_symlink() or not directory.is_dir():
+        raise PreparationError("TSS2 bundle must be a directory of pinned Debian ARM64 archives")
+    entries, packages = {}, []
+    for package, expected in TSS2_PACKAGES.items():
+        filename = f"{package}_{TSS2_VERSION}_arm64.deb"
+        archive = directory / filename
+        if archive.is_symlink() or not archive.is_file() or archive.stat().st_size > 2 * 1024 * 1024:
+            raise PreparationError("Missing/invalid pinned TSS2 archive: " + filename)
+        data = archive.read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise PreparationError("TSS2 Debian archive checksum mismatch: " + filename)
+        copyright_found, libraries = False, 0
+        with tarfile.open(fileobj=io.BytesIO(deb_data_archive(data)), mode="r:xz") as source:
+            for member in source:
+                name = member.name.removeprefix("./")
+                path = PurePosixPath(name)
+                if path.is_absolute() or ".." in path.parts:
+                    raise PreparationError("Unsafe path in pinned TSS2 archive")
+                if path.parent == PurePosixPath("usr/lib/aarch64-linux-gnu") and TSS2_LIBRARY.fullmatch(path.name):
+                    destination = "lib/" + path.name
+                    if member.issym():
+                        if not TSS2_LIBRARY.fullmatch(member.linkname):
+                            raise PreparationError("Unexpected TSS2 library symlink")
+                        value = ("symlink", member.linkname)
+                    elif member.isfile():
+                        content = source.extractfile(member).read()
+                        if (len(content) < 64 or content[:6] != b"\x7fELF\x02\x01"
+                                or struct.unpack_from("<H", content, 18)[0] != 183):
+                            raise PreparationError("Bundled TSS2 library is not little-endian ARM64 ELF")
+                        value = ("file", content)
+                    else:
+                        raise PreparationError("Unexpected TSS2 library inode type")
+                    libraries += 1
+                elif name == f"usr/share/doc/{package}/copyright" and member.isfile():
+                    destination = f"share/licenses/tss2/{package}/copyright"
+                    value = ("file", source.extractfile(member).read())
+                    copyright_found = True
+                else:
+                    continue
+                if destination in entries:
+                    raise PreparationError("Duplicate bundled TSS2 path")
+                entries[destination] = value
+        if not copyright_found or libraries < 2:
+            raise PreparationError("TSS2 package lacks its library/alias or copyright")
+        packages.append({
+            "package": package, "version": TSS2_VERSION, "architecture": "arm64",
+            "archive_sha256": expected, "archive_bytes": len(data),
+            "source_url": "https://deb.debian.org/debian/pool/main/t/tpm2-tss/" + filename,
+            "checksum_url": f"https://packages.debian.org/trixie/arm64/{package}/download",
+        })
+    digest = hashlib.sha256()
+    for destination, (kind, value) in sorted(entries.items()):
+        if kind == "symlink" and entries.get("lib/" + value, (None,))[0] != "file":
+            raise PreparationError("TSS2 library alias lacks a regular bundled target")
+        detail = value if kind == "symlink" else hashlib.sha256(value).hexdigest()
+        digest.update(json.dumps([destination, kind, detail]).encode() + b"\n")
+    return entries, {"packages": packages, "tree_sha256": digest.hexdigest(),
+                     "library_directory": "/app/lib", "files": len(entries)}
+
+
+def install_tss2_bundle(files, entries):
+    for name, (kind, value) in entries.items():
+        destination = files / name
+        if destination.exists() or destination.is_symlink():
+            raise PreparationError("TSS2 bundle would replace an existing base file")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "symlink":
+            destination.symlink_to(value)
+        else:
+            destination.write_bytes(value)
+            destination.chmod(0o644)
+
+
+def audit_tss2_runtime(files, runtime):
+    """Check recursive SONAME and GNU version needs as data, never with ldd."""
+    reader = shutil.which("readelf")
+    if reader is None:
+        raise PreparationError("Native readelf is required to audit bundled TSS2 dependencies")
+    directories = [files / "lib", runtime / "lib/aarch64-linux-gnu", runtime / "lib"]
+    queue = [files / "personal-payload/resources/native/remote-control-device-key.node"]
+    checked, sonames, version_needs = set(), set(), 0
+
+    def output(path, option):
+        check_elf(path, required=True)
+        return subprocess.run([reader, option, str(path)], check=True, capture_output=True, text=True).stdout
+
+    while queue:
+        current = queue.pop().resolve(strict=True)
+        if current in checked:
+            continue
+        checked.add(current)
+        dynamic = output(current, "-d")
+        versions = output(current, "--version-info")
+        requirements, library = {}, None
+        if "Version needs section" in versions:
+            for line in versions.split("Version needs section", 1)[1].splitlines():
+                file_match = re.search(r"File:\s+(\S+)", line)
+                version_match = re.search(r"Name:\s+(\S+)", line)
+                if file_match:
+                    library = file_match[1]
+                elif library and version_match:
+                    requirements.setdefault(library, set()).add(version_match[1])
+        for name in re.findall(r"\(NEEDED\).*?\[(.*?)\]", dynamic):
+            sonames.add(name)
+            provider = next((directory / name for directory in directories if (directory / name).is_file()), None)
+            if provider is None or not any(is_within(provider.resolve(), root.resolve()) for root in (files, runtime)):
+                raise PreparationError("Unresolved TSS2/addon dependency: " + name)
+            definitions = output(provider, "--version-info").split("Version needs section", 1)[0]
+            exported_versions = set(re.findall(r"Name:\s+(\S+)", definitions))
+            if not requirements.get(name, set()).issubset(exported_versions):
+                raise PreparationError("Unresolved GNU symbol version in TSS2/addon dependency: " + name)
+            version_needs += len(requirements.get(name, set()))
+            queue.append(provider)
+    return {"arm64_elf_files_checked": len(checked), "needed_sonames": sorted(sonames),
+            "gnu_version_requirements_verified": version_needs, "target_execution": False}
+
+
 def environment(output):
     env = {key: value for key, value in os.environ.items() if not key.startswith("FLATPAK_")}
     env.update({
@@ -364,7 +519,7 @@ def compose_appstream(files, app_id, env):
     generated.rename(info / "xmls" / (app_id + ".xml.gz"))
 
 
-def package_app(flatpak, output, env, key, payload, provenance, branch):
+def package_app(flatpak, output, env, key, payload, provenance, branch, tss2_entries):
     app_id = APP_IDS[key]
     root, executable, _ = payload
     build = output / "build" / key
@@ -373,9 +528,16 @@ def package_app(flatpak, output, env, key, payload, provenance, branch):
     files = build / "files"
     check_zypak_wrapper(files)
     shutil.copytree(root, files / "personal-payload", symlinks=True)
+    library_environment = ""
+    if key == "chatgpt":
+        install_tss2_bundle(files, tss2_entries)
+        runtime = output / "flatpak/runtime" / PLATFORM / ARCH / branch / "active/files"
+        provenance["bundled_tss2"]["static_runtime_audit"] = audit_tss2_runtime(files, runtime)
+        library_environment = 'export LD_LIBRARY_PATH="/app/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
     command = key + "-personal"
     write_text(files / "bin" / command,
-               "#!/bin/sh\nexec zypak-wrapper " + shlex.quote("/app/personal-payload/" + executable.as_posix()) + ' "$@"\n', 0o755)
+               "#!/bin/sh\n" + library_environment + "exec zypak-wrapper "
+               + shlex.quote("/app/personal-payload/" + executable.as_posix()) + ' "$@"\n', 0o755)
     title = "ChatGPT" if key == "chatgpt" else "Antigravity IDE"
     summary = "Personal package of the official ARM64 desktop application"
     protocol = app_protocol(key, root)
@@ -427,6 +589,7 @@ def make_seed(installation, archive):
     if zstd is None:
         raise PreparationError("Host zstd is required to create the seed archive")
     with archive.open("xb") as compressed:
+        os.fchmod(compressed.fileno(), 0o600)
         with subprocess.Popen([zstd, "-T0", "-3", "-c"], stdin=subprocess.PIPE, stdout=compressed) as compressor:
             try:
                 with tarfile.open(fileobj=compressor.stdin, mode="w|", dereference=False) as target:
@@ -469,7 +632,8 @@ def prepare(args, payloads, provenances, output):
     if actual != LIBREWOLF_COMMIT:
         raise PreparationError("Installed LibreWolf does not match the selected ARM64 commit")
     for key in APP_IDS:
-        package_app(flatpak, output, env, key, payloads[key], provenances[key], args.runtime_branch)
+        package_app(flatpak, output, env, key, payloads[key], provenances[key], args.runtime_branch,
+                    args.tss2_entries)
     # A full summary is tiny for two apps and lets the x86 staging client find
     # ARM AppStream refs without selecting a host-architecture subsummary.
     run([flatpak, "build-update-repo", "--no-summary-index", str(output / "private-repo")], env)
@@ -546,6 +710,8 @@ def main():
         parser.add_argument("--" + key + "-executable", required=True, help="Relative path to the real AArch64 Electron ELF, not a shell launcher")
         parser.add_argument("--" + key + "-archive", type=Path, help="Optional original release archive for private hash/provenance checking")
     parser.add_argument("--provenance", type=Path, required=True)
+    parser.add_argument("--chatgpt-tss2-bundle", type=Path, required=True,
+                        help="Directory with the four checksum-pinned official Debian ARM64 TSS2 packages")
     parser.add_argument("--output-dir", type=Path, required=True, help="New private directory outside this Git checkout")
     parser.add_argument("--flatpak", default="flatpak")
     parser.add_argument("--runtime-branch", default=RUNTIME_BRANCH)
@@ -566,7 +732,7 @@ def main():
             args.reuse_installation = validate_reuse_installation(args.reuse_installation, output, repository)
         payloads, provenances = {}, {}
         private_inputs = [args.provenance, args.chatgpt_dir, args.antigravity_dir,
-                          args.chatgpt_archive, args.antigravity_archive]
+                          args.chatgpt_archive, args.antigravity_archive, args.chatgpt_tss2_bundle]
         for private_path in private_inputs:
             if private_path is not None and is_within(private_path.resolve(), repository):
                 raise PreparationError("Proprietary payloads and private provenance must be outside this Git checkout")
@@ -576,6 +742,8 @@ def main():
                 raise PreparationError("Output and payload directories must not overlap")
             provenances[key] = validate_provenance(args.provenance, key, getattr(args, key + "_archive"))
             provenances[key]["url_protocol"] = app_protocol(key, payloads[key][0])
+        args.tss2_entries, tss2_provenance = validate_tss2_bundle(args.chatgpt_tss2_bundle)
+        provenances["chatgpt"]["bundled_tss2"] = tss2_provenance
         if not args.prepare:
             print("Local ARM64 payload/provenance validation passed. No files were written or downloaded.")
             retained_count = sum(len(payload[2]["foreign_arch_optional_prebuilds_as_data"]) for payload in payloads.values())

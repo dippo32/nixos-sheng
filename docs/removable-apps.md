@@ -75,6 +75,7 @@ Example from the checkout, with paths adjusted to the actual private inputs:
 python3 scripts/prepare-personal-flatpaks.py \
   --chatgpt-dir ../artifacts/private-image/chatgpt-payload \
   --chatgpt-executable chatgpt \
+  --chatgpt-tss2-bundle ../artifacts/private-image/dependencies/tss2-4.1.3-1.2 \
   --antigravity-dir ../artifacts/private-image/antigravity-payload \
   --antigravity-executable antigravity \
   --provenance ../artifacts/private-image/releases.json \
@@ -98,6 +99,33 @@ The host `zstd` compressor and native `appstreamcli compose` are also required
 because the SDK/base and runtime are fetched.
 The SDK and Electron base application are removed from the final installation
 after their contents have been used for packaging.
+
+ChatGPT's checked official Debian control declares TSS2 esys, mu and device
+libraries, which are absent from Freedesktop26.08. Its remote-control device-key
+addon loads them lazily; a successful basic launch would not exercise that path.
+The required `--chatgpt-tss2-bundle` contains four original Debian trixie ARM64
+packages at version4.1.3-1.2: `libtss2-esys-3.0.2-0t64`,
+`libtss2-mu-4.0.1-0t64`, `libtss2-sys1t64`, and `libtss2-tcti-device0t64`.
+`sys` is the recursive ELF dependency of `esys`. Obtain them from the official
+Debian `pool/main/t/tpm2-tss/` directory; the exact archive filenames and SHA256
+values are pinned in the helper, using each package's official download page
+(for example [esys ARM64](https://packages.debian.org/trixie/arm64/libtss2-esys-3.0.2-0t64/download)).
+
+The helper checks all four original archives before reading their data as
+archives, extracts only the finite TSS2 library/alias paths and package copyright
+files, and installs them under `/app/lib` and `/app/share/licenses/tss2`.
+It does not run Debian maintainer scripts, change the vendor payload, or copy
+arbitrary host libraries. Private provenance records archive URLs/hashes/versions,
+the exact dependency tree hash, and a recursive ARM64 SONAME/GNU-version audit
+against the selected Freedesktop runtime. Native `readelf` is required; `ldd` and
+ARM execution are not used. The ChatGPT launcher prepends `/app/lib` to the
+existing library path for that app. Qt theme shims and unused Android prebuilds
+are not made into mandatory runtime dependencies.
+
+This closes the packaged library dependency; it does not establish TPM hardware
+availability, permission to access a TPM device, or remote-control enrollment on
+the tablet. Those optional features and ordinary app startup still need runtime
+testing. No additional device permission is granted by this dependency fix.
 
 The preparation directory contains `personal-flatpaks-home.tar.zst`, its SHA256,
 private `provenance.json`, `installed-refs.tsv`, and build/repository working data.
