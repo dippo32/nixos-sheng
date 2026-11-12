@@ -17,6 +17,11 @@ assert
 assert c.services.pipewire.enable && c.services.pipewire.pulse.enable;
 assert !c.services.shengFirmware.keyboard.enable;
 assert !c.services.shengFirmware.pen.enable;
+assert !c.services.shengSerialConsole.enable;
+assert !(c.systemd.services ? "serial-getty@ttyGS0");
+assert builtins.elem "g_serial.enable=0" c.boot.kernelParams;
+assert !(builtins.elem "console=ttyGS0" c.boot.kernelParams);
+assert !(builtins.elem "g_serial.use_acm=1" c.boot.kernelParams);
 assert !(c.systemd.services ? sheng-devauth);
 assert !(c.systemd.services ? xiaomi-sheng-keyboard-helper-angle);
 assert !(c.environment.etc ? "xdg/autostart/xiaomi-pen-status.desktop");
@@ -44,6 +49,7 @@ assert builtins.match ".*GPGKey=.+" remote != null;
   flathub = true;
   keyboard = c.services.shengFirmware.keyboard.enable;
   pen = c.services.shengFirmware.pen.enable;
+  usbDebugGadgetDefault = false;
   touchKeyboardDefault = true;
   sleepCandidate = "s2idle; hardware validation required";
 }

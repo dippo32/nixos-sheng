@@ -13,6 +13,15 @@ CLI, KDE and GNOME outputs retain their previous defaults.
 - THP touchscreen, audio, sensors, fingerprint, charging and general Bluetooth
   support remain enabled. The shared THP input processor is still required for
   the touchscreen; its low-level pen code is not removed from the driver.
+- The bring-up USB serial console and its root getty are disabled. The pinned
+  kernel's `g_serial.enable=0` parameter prevents its built-in legacy gadget from
+  registering with the UDC at boot; disabling the getty alone would not do this.
+  This removes the debug gadget's claim on Type-C. Actual USB host/DP, charging
+  role changes and suspend still require hardware validation. Kernel support
+  is retained for later diagnosis; daily use relies on the touch desktop and Wi-Fi.
+  The existing diagnostics menu entry adds logging only; it does not re-enable
+  USB serial automatically. Serial diagnosis requires an explicit boot parameter
+  override or configuration change.
 - The installed Plasma Keyboard is selected as KWin's default input method
   through `/etc/xdg/kwinrc`, so touch input has a keyboard in the logged-in
   desktop as well as the SDDM greeter. A user's own KWin preferences take
@@ -53,6 +62,10 @@ These changes do not establish actual charging power or repair a blocked
 kernel Type-C role write. The current service timeout and protocol retries are
 retained. Voltage/current limits and thermal controls are not modified.
 
+The USB serial switch is implemented by the pinned kernel's
+[`g_serial` enable parameter](https://github.com/ianchb/sm8550-mainline/blob/1fb56e66091e71160d7c7f8e13b065d5b6ab8b8c/drivers/usb/gadget/legacy/serial.c#L258-L300).
+It is an existing upstream control, not an added DWC3 suspend patch.
+
 Flathub descriptor retrieved from
 <https://dl.flathub.org/repo/flathub.flatpakrepo> on 2026-11-12, SHA256
 `3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a`.
@@ -81,7 +94,8 @@ only this candidate and the matching single-system U-Boot image. Its artifact is
 `sheng-kde-personal-flashable`; it includes revision/lock provenance and
 `SHA256SUMS`. A successful workflow is build evidence, not a hardware test.
 For unchanged kernels, the workflow checks matching kernel artifacts from this
-fork and then the upstream repository. It verifies their path and checksum
+fork (including failed/cancelled runs with a completed kernel upload) and then
+the upstream repository. It verifies their path and checksum
 before importing, and exports a kernel artifact for future builds. If no cache
 is accessible, it builds the locked source on ARM64.
 

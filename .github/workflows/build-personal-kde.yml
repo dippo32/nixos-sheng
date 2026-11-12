@@ -84,9 +84,10 @@ jobs:
             if [ "$repository" = "$GITHUB_REPOSITORY" ]; then
               workflow=build-personal-kde.yml
               branch=$GITHUB_REF_NAME
-              # Prefer a successful personal build. A failed image build may
-              # still contain the kernel uploaded by the earlier export step.
-              statuses=(success failure)
+              # Prefer a successful personal build. Failed/cancelled image
+              # builds can still contain a finalized kernel from the earlier
+              # upload step. Path/checksum checks below remain mandatory.
+              statuses=(success failure cancelled)
             else
               workflow=build.yml
               branch=main
@@ -208,6 +209,7 @@ jobs:
             'Plasma on-screen keyboard selected by default for touch input.' \
             'Production display path without added bring-up logging; ZSTD zram and basic file indexing.' \
             'Charger helper re-entry/enqueue fixes and staged PM diagnostics included.' \
+            'Bring-up USB serial gadget disabled at boot; actual Type-C roles require device testing.' \
             'A successful build does not verify device suspend/resume or battery life.' \
             > personal-kde-artifacts/BUILD-INFO.txt
           (cd personal-kde-artifacts && sha256sum \
