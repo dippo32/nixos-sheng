@@ -1,0 +1,85 @@
+name: build-personal-boot
+
+on:
+  push:
+    branches: [codex/personal-direct-boot]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Restore existing Nix store cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-aarch64-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix') }}
+          restore-prefixes-first-match: nix-aarch64-${{ runner.os }}-
+          save: false
+
+      - name: Build personal direct-boot U-Boot
+        run: nix build -L .#u-boot-personal -o result-uboot-personal
+
+      - name: Verify boot image and embedded environment
+        run: |
+          set -euo pipefail
+          test -s result-uboot-personal/boot.img
+          size=$(stat -L -c %s result-uboot-personal/boot.img)
+          test "$size" -lt $((192 * 1024 * 1024))
+          nix shell --inputs-from . nixpkgs#android-tools -c unpack_bootimg \
+            --boot_img result-uboot-personal/boot.img --out bootimg-unpacked | tee bootimg-info.txt
+          grep -Fxq 'boot image header version: 2' bootimg-info.txt
+          grep -Fq 'kernel load address: 0x00008000' bootimg-info.txt
+          grep -Fq 'page size: 4096' bootimg-info.txt
+          grep -Fq 'root=PARTLABEL=userdata' bootimg-info.txt
+          python3 - <<'PY'
+          from pathlib import Path
+
+          env = Path('result-uboot-personal/u-boot.bin').read_bytes()
+          for value in (b'bootcmd=run bootlinux\0',
+                        b'bootlinux=run bootnixos; run bootrescue\0',
+                        b'bootrescue='):
+              if value not in env:
+                  raise SystemExit(f'Missing embedded environment entry: {value!r}')
+          if b'bootcmd=run loadgenmenu; bootmenu 5\0' in env:
+              raise SystemExit('Old menu boot command remains in the image')
+          PY
+
+      - name: Prepare checksummed artifact
+        run: |
+          set -euo pipefail
+          mkdir -p personal-boot-artifacts
+          cp result-uboot-personal/boot.img personal-boot-artifacts/sheng-personal-direct-boot.img
+          cp bootimg-info.txt personal-boot-artifacts/bootimg-info.txt
+          cp flake.lock personal-boot-artifacts/flake.lock
+          git rev-parse HEAD > personal-boot-artifacts/revision.txt
+          printf '%s\n' \
+            'Personal direct-boot U-Boot candidate for Xiaomi Pad 6S Pro (sheng).' \
+            'Root partition: userdata. Normal extlinux boot retains the existing rescue fallback.' \
+            'Build and static inspection do not prove boot or recovery on a device.' \
+            > personal-boot-artifacts/BUILD-INFO.txt
+          (cd personal-boot-artifacts && sha256sum \
+            sheng-personal-direct-boot.img bootimg-info.txt flake.lock revision.txt BUILD-INFO.txt \
+            > SHA256SUMS)
+
+      - name: Upload personal U-Boot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-personal-direct-boot
+          if-no-files-found: error
+          path: personal-boot-artifacts/

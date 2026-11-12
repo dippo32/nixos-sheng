@@ -8,6 +8,7 @@
   src,
   version ? "sheng",
   rootPartition ? "userdata",
+  directBoot ? false,
 }:
 
 let
@@ -25,8 +26,9 @@ let
     "--id"
   ];
 in
-assert lib.assertMsg (builtins.match "[A-Za-z0-9_-]{1,36}" rootPartition != null)
-  "U-Boot rootPartition must be a simple GPT partition label";
+assert lib.assertMsg (
+  builtins.match "[A-Za-z0-9_-]{1,36}" rootPartition != null
+) "U-Boot rootPartition must be a simple GPT partition label";
 (buildUBoot {
   inherit src version;
 
@@ -57,31 +59,42 @@ assert lib.assertMsg (builtins.match "[A-Za-z0-9_-]{1,36}" rootPartition != null
     platforms = [ "aarch64-linux" ];
   };
 }).overrideAttrs
-  (old: {
-    pname = "u-boot-sheng";
+  (
+    old:
+    {
+      pname = "u-boot-sheng";
 
-    nativeBuildInputs = old.nativeBuildInputs ++ [
-      android-tools # mkbootimg
-      xxd # CONFIG_ENV_USE_DEFAULT_ENV_TEXT_FILE embeds sheng.env via xxd
-    ];
+      nativeBuildInputs = old.nativeBuildInputs ++ [
+        android-tools # mkbootimg
+        xxd # CONFIG_ENV_USE_DEFAULT_ENV_TEXT_FILE embeds sheng.env via xxd
+      ];
 
-    # zig writes caches relative to $HOME, which is not writable here.
-    preBuild = ''
-      export HOME=$TMPDIR
-      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-      export ZIG_LOCAL_CACHE_DIR=$TMPDIR/zig-cache
-    '';
+      # zig writes caches relative to $HOME, which is not writable here.
+      preBuild = ''
+        export HOME=$TMPDIR
+        export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+        export ZIG_LOCAL_CACHE_DIR=$TMPDIR/zig-cache
+      '';
 
-    postInstall = ''
-      mkbootimg ${lib.concatStringsSep " " mkbootimgArgs} -o "$out/boot.img"
-    '';
-  } // lib.optionalAttrs (rootPartition != "userdata") {
-    # Keep the existing single-system environment byte-for-byte unchanged.
-    # Both normal/menu loading and the rescue path must select the same root.
-    postPatch = (old.postPatch or "") + ''
-      substituteInPlace board/qualcomm/sheng.env \
-        --replace-fail "part number scsi 0 userdata partnum" "part number scsi 0 ${rootPartition} partnum" \
-        --replace-fail "root=PARTLABEL=userdata" "root=PARTLABEL=${rootPartition}"
-    '';
+      postInstall = ''
+        mkbootimg ${lib.concatStringsSep " " mkbootimgArgs} -o "$out/boot.img"
+      '';
+    }
+    // lib.optionalAttrs (rootPartition != "userdata" || directBoot) {
+      # Keep the existing single-system environment byte-for-byte unchanged.
+      # Both normal/menu loading and the rescue path must select the same root.
+      postPatch =
+        (old.postPatch or "")
+        + lib.optionalString (rootPartition != "userdata") ''
+          substituteInPlace board/qualcomm/sheng.env \
+            --replace-fail "part number scsi 0 userdata partnum" "part number scsi 0 ${rootPartition} partnum" \
+            --replace-fail "root=PARTLABEL=userdata" "root=PARTLABEL=${rootPartition}"
+        ''
+        + lib.optionalString directBoot ''
+          # Skip the generation menu while keeping bootlinux's normal/rescue path.
+          substituteInPlace board/qualcomm/sheng.env \
+            --replace-fail 'bootcmd=run loadgenmenu; bootmenu 5' 'bootcmd=run bootlinux'
+        '';
 
-  })
+    }
+  )

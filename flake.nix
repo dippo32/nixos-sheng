@@ -229,6 +229,12 @@
               version = u-boot-src.shortRev or "dirty";
             };
 
+            u-boot-personal = pkgs.callPackage ./packages/u-boot {
+              src = u-boot-src;
+              version = u-boot-src.shortRev or "dirty";
+              directBoot = true;
+            };
+
             u-boot-dual = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;
               version = u-boot-src.shortRev or "dirty";
