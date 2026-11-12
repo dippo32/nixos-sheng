@@ -7,6 +7,11 @@ Xiaomi Pad 6S Pro（sheng）的标准 NixOS + U-Boot 移植，提供独立的单
 启动、标准 rebuild、世代回退、双向切换及多项外设已实测；桌面体验、长期待机等仍需验证。
 “能构建”“设备被识别”“实际交互成功”在文档中分别记录，不宣称全部功能已对齐 Debian。
 
+An optional [personal KDE single-boot candidate](docs/personal-kde.md) disables
+unused magnetic-keyboard and Focus Pen helpers, includes Flatpak and Flathub,
+and selects s2idle for further suspend testing. Existing images keep their
+accessory defaults. This candidate does not claim to fix the known DWC3 issue.
+
 | 你要做什么 | 从这里开始 |
 | --- | --- |
 | 接替维护、让其他 agent 接手 | [维护交接](docs/HANDOVER.md)、[agent 工作约定](AGENTS.md) |

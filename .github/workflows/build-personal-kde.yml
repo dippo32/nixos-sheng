@@ -1,0 +1,144 @@
+name: build-personal-kde
+
+on:
+  # The first push can build this candidate before the workflow is on main.
+  # Other branches and pull requests do not start this additional image build.
+  push:
+    branches: [codex/kde-personal-flatpak-power]
+  workflow_dispatch:
+    inputs:
+      desktop_username:
+        description: "Desktop login username (initial password remains nixos)"
+        required: false
+        default: nixos
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure desktop image username
+        env:
+          DESKTOP_USERNAME: ${{ inputs.desktop_username || 'nixos' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DESKTOP_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,30}$ || "$DESKTOP_USERNAME" == root ]]; then
+            echo "Invalid desktop username: use 1-31 lowercase letters, digits, _ or -, starting with a letter or _. root is not allowed." >&2
+            exit 1
+          fi
+          printf '{ userName = "%s"; }\n' "$DESKTOP_USERNAME" > image-settings.nix
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            keep-env-derivations = true
+            keep-outputs = true
+
+      - name: Restore existing Nix store cache without saving or purging
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-aarch64-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix') }}
+          restore-prefixes-first-match: nix-aarch64-${{ runner.os }}-
+          save: false
+
+      - name: Check desktop and accessory configuration
+        run: |
+          set -euo pipefail
+          for check in desktop-images firmware-options personal-kde; do
+            nix eval --json --impure --option allow-import-from-derivation false \
+              --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
+          done
+
+      - name: Restore matching kernel closure from a successful main build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          kernel=$(nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.outPath)
+          if nix path-info "$kernel" >/dev/null 2>&1; then
+            echo "The selected kernel is already in the store."
+            exit 0
+          fi
+          if ! previous=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
+            echo "Kernel artifact discovery unavailable; building from locked source."
+            exit 0
+          fi
+          if [ -z "$previous" ] || ! gh run download "$previous" --repo "$GITHUB_REPOSITORY" --name sheng-kernel-closure --dir seed-kernel; then
+            echo "No previous kernel artifact; building from locked source."
+            exit 0
+          fi
+          if [ ! -f seed-kernel/kernel-path.txt ] || [ "$(cat seed-kernel/kernel-path.txt)" != "$kernel" ]; then
+            echo "The previous kernel does not match this configuration; building from locked source."
+            exit 0
+          fi
+          (cd seed-kernel && sha256sum -c SHA256SUMS)
+          zstd -dc seed-kernel/sheng-kernel-closure.nar.zst | sudo "$(command -v nix-store)" --import | tee seed-kernel/imported-paths.txt >/dev/null
+          nix path-info "$kernel" >/dev/null
+
+      - name: Build and verify single-system U-Boot
+        run: |
+          set -euo pipefail
+          nix build -L .#u-boot -o result-uboot
+          test -f result-uboot/boot.img
+          size=$(stat -L -c %s result-uboot/boot.img)
+          test "$size" -gt 0
+          test "$size" -lt $((192 * 1024 * 1024))
+          nix shell --inputs-from . nixpkgs#android-tools -c unpack_bootimg \
+            --boot_img result-uboot/boot.img --out bootimg-unpacked | tee bootimg-info.txt
+          grep -Fxq 'boot image header version: 2' bootimg-info.txt
+          grep -Fq 'kernel load address: 0x00008000' bootimg-info.txt
+          grep -Fq 'page size: 4096' bootimg-info.txt
+          grep -Fq 'root=PARTLABEL=userdata' bootimg-info.txt
+
+      - name: Build personal KDE single-system image only
+        run: nix build -L .#nixos-kde-personal -o result-personal-kde
+
+      - name: Verify sparse image and prepare checksummed artifact
+        run: |
+          set -euo pipefail
+          img=result-personal-kde/sheng-rootfs.sparse.img
+          test -s "$img"
+          magic=$(od -An -tx1 -N4 "$img" | tr -d ' \n')
+          test "$magic" = "3aff26ed"
+          test "$(nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.sheng.rootfs.partlabel)" = userdata
+          mkdir -p personal-kde-artifacts
+          cp result-uboot/boot.img personal-kde-artifacts/sheng-boot.img
+          nix shell --inputs-from . nixpkgs#zstd -c zstd -T0 --long=27 -3 -f "$img" \
+            -o personal-kde-artifacts/sheng-rootfs-kde-personal.sparse.img.zst
+          git rev-parse HEAD > personal-kde-artifacts/revision.txt
+          cp flake.lock personal-kde-artifacts/flake.lock
+          nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.system.build.toplevel.outPath > personal-kde-artifacts/system-path.txt
+          nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.outPath > personal-kde-artifacts/kernel-path.txt
+          cp bootimg-info.txt personal-kde-artifacts/bootimg-info.txt
+          printf '%s\n' \
+            'Xiaomi Pad 6S Pro (sheng): personal KDE single-system candidate.' \
+            'Target root partition: userdata. Installation erases existing userdata.' \
+            'Keyboard/pen helpers disabled; Flatpak and Flathub included.' \
+            'A successful build does not verify device suspend/resume or battery life.' \
+            > personal-kde-artifacts/BUILD-INFO.txt
+          (cd personal-kde-artifacts && sha256sum \
+            sheng-boot.img sheng-rootfs-kde-personal.sparse.img.zst revision.txt \
+            flake.lock system-path.txt kernel-path.txt bootimg-info.txt BUILD-INFO.txt \
+            > SHA256SUMS)
+
+      - name: Upload personal KDE single-system image
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-kde-personal-flashable
+          if-no-files-found: error
+          compression-level: 0
+          path: personal-kde-artifacts/

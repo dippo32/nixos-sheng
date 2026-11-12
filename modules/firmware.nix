@@ -1,5 +1,5 @@
-# The single toggle for every sheng vendor userspace daemon. hardware.nix
-# stays unconditional; only vendor-specific daemons live behind this.
+# Vendor userspace integration. Accessory helpers can be disabled independently
+# without removing the shared touchscreen, sensors, audio or charging stack.
 {
   config,
   lib,
@@ -12,7 +12,22 @@ let
   sp = pkgs.shengPackages;
 in
 {
-  options.services.shengFirmware.enable = lib.mkEnableOption "Xiaomi sheng vendor userspace stack (sensors, keyboard/pen/fingerprint/charger auth)";
+  options.services.shengFirmware = {
+    enable = lib.mkEnableOption "Xiaomi sheng vendor userspace stack (sensors, keyboard/pen/fingerprint/charger auth)";
+    keyboard.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Enable authentication, fold-angle and mic-mute helpers for the Xiaomi magnetic keyboard.";
+    };
+    pen.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Enable the Focus Pen status utility and desktop automatic pairing.
+        The shared THP touchscreen processor remains enabled when this is false.
+      '';
+    };
+  };
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [
@@ -20,25 +35,27 @@ in
       sp.libssc
       sp.iio-sensor-proxy
       sp.sheng-sensors
-      sp.sheng-devauth
       sp.sheng-fingerprint
       sp.sheng-thp
-      sp.sheng-pen-status
-      sp.sheng-keyboard-helper
       sp.sheng-mipps-auth
       sp.sheng-charger-mode
       sp.alsa-ucm-sheng
-    ];
+    ]
+    ++ lib.optionals cfg.keyboard.enable [
+      sp.sheng-devauth
+      sp.sheng-keyboard-helper
+    ]
+    ++ lib.optional cfg.pen.enable sp.sheng-pen-status;
 
     systemd.packages = [
       sp.fastrpc # adsprpcd-sensorspd.service
       sp.iio-sensor-proxy # iio-sensor-proxy.service (+ .d/10-sheng-sensors.conf)
-      sp.sheng-devauth # sheng-devauth.service (Requires=qteesupplicant.service)
       sp.sheng-fingerprint # qteesupplicant.service, sfsconfig.service, fprintd.service.d/*
       sp.sheng-thp # xiaomi-sheng-thp.service
       sp.sheng-mipps-auth # xiaomi-mipps-auth.service
       sp.sheng-charger-mode # xiaomi-charger-mode.service
-    ];
+    ]
+    ++ lib.optional cfg.keyboard.enable sp.sheng-devauth;
 
     # sheng-fingerprint's drop-in expects the distro to provide fprintd.
     services.fprintd.enable = true;
@@ -49,12 +66,14 @@ in
 
     systemd.services = {
       "iio-sensor-proxy".wantedBy = [ "multi-user.target" ];
-      "sheng-devauth".wantedBy = [ "sysinit.target" ];
       "qteesupplicant".wantedBy = [ "multi-user.target" ];
       "sfsconfig".wantedBy = [ "qteesupplicant.service" ];
       "xiaomi-sheng-thp".wantedBy = [ "multi-user.target" ];
       "xiaomi-mipps-auth".wantedBy = [ "multi-user.target" ];
       "xiaomi-charger-mode".wantedBy = [ "multi-user.target" ];
+      "sheng-devauth" = lib.mkIf cfg.keyboard.enable {
+        wantedBy = [ "sysinit.target" ];
+      };
     };
 
     # The aDSP writes temp.json back into this tree, so it has to be a mutable
@@ -80,17 +99,19 @@ in
       '';
     };
 
-    systemd.user.services."xiaomi-sheng-keyboard-helper-micmute" = {
-      description = "Xiaomi keyboard mic-mute LED sync";
-      after = [ "pipewire-pulse.service" ];
-      unitConfig.ConditionPathExists = "/sys/class/leds/nanosic::micmute/brightness";
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${sp.sheng-keyboard-helper}/libexec/xiaomi-sheng-keyboard-helper --micmute";
+    systemd.user.services = lib.optionalAttrs cfg.keyboard.enable {
+      "xiaomi-sheng-keyboard-helper-micmute" = {
+        description = "Xiaomi keyboard mic-mute LED sync";
+        after = [ "pipewire-pulse.service" ];
+        unitConfig.ConditionPathExists = "/sys/class/leds/nanosic::micmute/brightness";
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = "${sp.sheng-keyboard-helper}/libexec/xiaomi-sheng-keyboard-helper --micmute";
+        };
       };
     };
 
-    systemd.services."xiaomi-sheng-keyboard-helper-angle" = {
+    systemd.services."xiaomi-sheng-keyboard-helper-angle" = lib.mkIf cfg.keyboard.enable {
       description = "Xiaomi keyboard fold-angle helper";
       wants = [ "adsprpcd-sensorspd.service" ];
       after = [ "adsprpcd-sensorspd.service" ];
@@ -109,14 +130,16 @@ in
       sp.sheng-mipps-auth # 90-xiaomi-mipps-auth.rules
     ];
 
-    services.udev.extraRules = ''
+    services.udev.extraRules = lib.mkIf cfg.keyboard.enable ''
       SUBSYSTEM=="misc", KERNEL=="nanosic_hinge*", ENV{keyboard_attached}=="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="xiaomi-sheng-keyboard-helper-angle.service"
       SUBSYSTEM=="input", ATTRS{name}=="Xiaomi Keyboard", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="xiaomi-sheng-keyboard-helper-micmute.service"
       SUBSYSTEM=="leds", KERNEL=="nanosic::micmute", MODE="0666"
     '';
 
-    environment.etc."xdg/autostart/xiaomi-pen-status.desktop".source =
-      "${sp.sheng-pen-status}/etc/xdg/autostart/xiaomi-pen-status.desktop";
+    environment.etc = lib.optionalAttrs cfg.pen.enable {
+      "xdg/autostart/xiaomi-pen-status.desktop".source =
+        "${sp.sheng-pen-status}/etc/xdg/autostart/xiaomi-pen-status.desktop";
+    };
 
     environment.pathsToLink = [ "/share/alsa" ];
     # A union, not the sheng package alone: ALSA_CONFIG_UCM2 replaces the

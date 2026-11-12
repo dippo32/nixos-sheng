@@ -1,0 +1,22 @@
+# Read-only baseline collection. Does not change sleep mode, suspend, trace,
+# disable devices or services, or publish logs.
+run() {
+  printf '\n== %s ==\n' "$*"
+  "$@" || true
+}
+
+run uname -r
+run readlink -f /run/current-system
+run findmnt -rn -o SOURCE,TARGET,FSTYPE,OPTIONS /
+run systemctl --failed --no-pager
+
+for path in /sys/power/state /sys/power/mem_sleep /sys/power/suspend_stats/success /sys/power/suspend_stats/fail /sys/power/suspend_stats/last_failed_dev; do
+  if [ -r "$path" ]; then
+    run cat "$path"
+  fi
+done
+
+if [ -r /sys/kernel/debug/wakeup_sources ]; then
+  run head -n 60 /sys/kernel/debug/wakeup_sources
+fi
+run journalctl -k -b --no-pager -n 120

@@ -68,6 +68,16 @@
         ];
       };
 
+      shengPersonalKde = self.lib.shengSystem {
+        inherit nixpkgs;
+        modules = [
+          { networking.hostName = "sheng-kde-personal"; }
+          ./modules/desktop-image.nix
+          ./modules/desktop-kde.nix
+          ./modules/desktop-personal.nix
+        ];
+      };
+
       shengDualKde = self.lib.shengSystem {
         inherit nixpkgs;
         modules = [
@@ -183,6 +193,7 @@
       nixosConfigurations.sheng-dual = shengDual;
       nixosConfigurations.sheng-kde = shengKde;
       nixosConfigurations.sheng-gnome = shengGnome;
+      nixosConfigurations.sheng-kde-personal = shengPersonalKde;
       nixosConfigurations.sheng-dual-kde = shengDualKde;
       nixosConfigurations.sheng-dual-gnome = shengDualGnome;
       # Opt-in stage-1 validation target. The normal image outputs retain
@@ -209,6 +220,7 @@
             nixos-dual = shengDual.config.system.build.shengImage;
             nixos-kde = shengKde.config.system.build.shengImage;
             nixos-gnome = shengGnome.config.system.build.shengImage;
+            nixos-kde-personal = shengPersonalKde.config.system.build.shengImage;
             nixos-dual-kde = shengDualKde.config.system.build.shengImage;
             nixos-dual-gnome = shengDualGnome.config.system.build.shengImage;
 
