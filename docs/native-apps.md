@@ -15,6 +15,10 @@ Its official tarball was fetched and SHA-256 pinned; ARM64 build success
 was verified in [run 43569038143](https://github.com/dippo32/nixos-sheng/actions/runs/43569038143)
 along with the ChatGPT Desktop package. Neither GUI's runtime behaviour on this
 device has yet been verified.
+OpenAI describes its [Linux desktop preview](https://community.openai.com/t/codex-in-chatgpt-desktop-app-for-linux-is-now-in-preview/1390027)
+as a combined ChatGPT, Work and Codex application with ARM64 support. The
+package URL containing `codex-app-prod` alone does not identify it as a
+Codex-only application; verify the ChatGPT interface after launch.
 NixOS is not in OpenAI's list of officially supported Linux distributions for
 the ChatGPT preview; consult the vendor's Linux documentation for current
 platform and feature limitations.
