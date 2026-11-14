@@ -1,0 +1,150 @@
+--- a/src/ui/qml/SplitRule.js
++++ b/src/ui/qml/SplitRule.js
+@@ -0,0 +1,14 @@
++.pragma library
++
++// Keep Auto tied to landscape geometry, even on wide portrait displays.
++function shouldSplit(mode, width, screenHeight, baseHeight, stripHeight, rowCount) {
++    if (mode === 1)
++        return true;
++    if (mode === 2)
++        return false;
++    if (width <= screenHeight)
++        return false;
++    const keyWidth = width / 10;
++    const keyHeight = (baseHeight - stripHeight) / Math.max(1, rowCount);
++    return width >= 2400 || (width / Math.max(1, screenHeight) >= 1.4 && keyWidth > keyHeight * 1.5);
++}
+--- a/src/settings/qml/previews/SplitRule.js
++++ b/src/settings/qml/previews/SplitRule.js
+@@ -1,18 +1,14 @@
+ .pragma library
+
+-const Auto = 0;
+-const Always = 1;
+-const Never = 2;
+-
+-function shouldSplit(mode, screenWidth, screenHeight, heightShare, rows) {
+-    if (mode === Always) {
++// Keep Auto tied to landscape geometry, even on wide portrait displays.
++function shouldSplit(mode, width, screenHeight, baseHeight, stripHeight, rowCount) {
++    if (mode === 1)
+         return true;
+-    }
+-    if (mode === Never) {
++    if (mode === 2)
+         return false;
+-    }
+-    const aspect = screenWidth / screenHeight;
+-    const keyWidth = screenWidth / 10;
+-    const keyHeight = screenHeight * heightShare / rows;
+-    return aspect >= 1.6 && keyWidth > keyHeight * 1.5;
++    if (width <= screenHeight)
++        return false;
++    const keyWidth = width / 10;
++    const keyHeight = (baseHeight - stripHeight) / Math.max(1, rowCount);
++    return width >= 2400 || (width / Math.max(1, screenHeight) >= 1.4 && keyWidth > keyHeight * 1.5);
+ }
+--- a/src/ui/qml/Keyboard.qml
++++ b/src/ui/qml/Keyboard.qml
+@@ -1,6 +1,7 @@
+ pragma ComponentBehavior: Bound
+
+ import QtQuick
++import "SplitRule.js" as SplitRule
+ import org.kde.kirigami as Kirigami
+ import org.devl0rd.kboard.config
+ import org.devl0rd.kboard.clipboard
+@@ -33,13 +34,7 @@
+     readonly property real targetHeight: tall ? expandedHeight : baseHeight
+     readonly property real headroom: Math.round(baseHeight * 0.12)
+     readonly property int rowCount: Math.max(4, keysView.surface.rowCount)
+-    readonly property bool splitWanted: {
+-        if (Settings.splitMode !== 0)
+-            return Settings.splitMode === 1
+-        const keyWidth = width / 10
+-        const keyHeight = (baseHeight - stripHeight) / rowCount
+-        return width >= 2400 || (width / Math.max(1, screenHeight) >= 1.6 && keyWidth > keyHeight * 1.5)
+-    }
++    readonly property bool splitWanted: SplitRule.shouldSplit(Settings.splitMode, width, screenHeight, baseHeight, stripHeight, rowCount)
+     readonly property bool splitShown: splitWanted && panel === "keys"
+     readonly property real splitHalf: Math.round(width * Settings.splitHalfWidth)
+     readonly property real halfWidth: splitAmount > 0 ? width / 2 - (width / 2 - splitHalf) * splitAmount : width / 2
+--- a/src/ui/CMakeLists.txt
++++ b/src/ui/CMakeLists.txt
+@@ -40,6 +40,7 @@
+     qml/KeyModifiers.qml
+     qml/KeyRipple.qml
+     qml/Keyboard.qml
++    qml/SplitRule.js
+     qml/KeyboardBackdrop.qml
+     qml/KeyboardView.qml
+     qml/LongPressRing.qml
+--- a/src/settings/qml/pages/layout/LayoutPreview.qml
++++ b/src/settings/qml/pages/layout/LayoutPreview.qml
+@@ -34,7 +34,7 @@
+
+     function splitFor(index) {
+         const s = screens[index];
+-        return SplitRule.shouldSplit(Settings.splitMode, s.width, s.height, share(index), rows) ? 1 : 0;
++        return SplitRule.shouldSplit(Settings.splitMode, s.width, s.height, Math.round(s.height * share(index)), 0, rows) ? 1 : 0;
+     }
+
+     SceneClock {
+--- a/tests/ui/CMakeLists.txt
++++ b/tests/ui/CMakeLists.txt
+@@ -5,5 +5,7 @@
+         TEST_NAME ${test}
+         LINK_LIBRARIES Qt::Test Qt::Quick KBoardUi KBoardConfig KBoardPlatform
+     )
+-    target_compile_definitions(${test} PRIVATE KBOARD_LAYOUT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../data/layouts")
++    target_compile_definitions(${test} PRIVATE KBOARD_LAYOUT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../data/layouts"
++        KBOARD_SPLIT_RULE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../src/ui/qml/SplitRule.js"
++        KBOARD_PREVIEW_RULE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../src/settings/qml/previews/SplitRule.js")
+ endforeach()
+--- a/tests/ui/testkeylayout.cpp
++++ b/tests/ui/testkeylayout.cpp
+@@ -1,6 +1,8 @@
+ #include "keylayout.h"
+ #include "layouts.h"
+
++#include <QFile>
++#include <QJSEngine>
+ #include <QTest>
+
+ class TestKeyLayout : public QObject
+@@ -25,6 +27,34 @@
+     }
+
+ private Q_SLOTS:
++    void automaticSplitFollowsActualLandscapeRule()
++    {
++        QFile source(QStringLiteral(KBOARD_SPLIT_RULE_PATH));
++        QFile preview(QStringLiteral(KBOARD_PREVIEW_RULE_PATH));
++        QVERIFY(source.open(QIODevice::ReadOnly));
++        QVERIFY(preview.open(QIODevice::ReadOnly));
++        const QByteArray script = source.readAll();
++        QCOMPARE(preview.readAll(), script); // Production and preview must use the same rule.
++        QVERIFY(script.startsWith(".pragma library\n"));
++        QJSEngine engine;
++        const QJSValue function = engine.evaluate(QString::fromUtf8(script.mid(sizeof(".pragma library\n") - 1))
++                                                    + QStringLiteral("\nshouldSplit"));
++        QVERIFY2(function.isCallable(), qPrintable(function.toString()));
++        auto split = [&function](int mode, int w, int h, int base, int strip, int rows) {
++            return function.call({QJSValue(mode), QJSValue(w), QJSValue(h), QJSValue(base), QJSValue(strip), QJSValue(rows)}).toBool();
++        };
++        QVERIFY(split(0, 1524, 1016, 366, 55, 5)); // Tablet at 200% scale.
++        QVERIFY(!split(0, 1016, 1524, 457, 55, 5)); // Portrait stays whole.
++        QVERIFY(split(0, 1400, 1000, 360, 54, 5)); // Threshold is inclusive.
++        QVERIFY(!split(0, 1399, 1000, 360, 54, 5));
++        QVERIFY(!split(0, 1200, 1000, 360, 54, 5)); // Typical narrow desktop.
++        QVERIFY(!split(0, 1400, 1000, 1000, 0, 4)); // Keep key-size guard.
++        QVERIFY(!split(0, 2500, 3000, 900, 50, 5)); // Wide portrait never auto-splits.
++        QVERIFY(split(0, 2400, 2000, 700, 50, 5)); // Existing wide-landscape shortcut.
++        QVERIFY(split(1, 1016, 1524, 457, 55, 5)); // Explicit Always is unchanged.
++        QVERIFY(!split(2, 3048, 2032, 732, 110, 5)); // Explicit Never is unchanged.
++    }
++
+     void splitPointPrefersTheLargerLeftHalfOnTies()
+     {
+         const QVariantList row {key(QStringLiteral("shift"), 1.5), key(QStringLiteral("char"), 1), key(QStringLiteral("char"), 1),
