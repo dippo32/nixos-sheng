@@ -248,6 +248,14 @@ class ChargerSafety(unittest.TestCase):
         self.assertLessEqual(changes[0][0], 14.2)
         poweroff.assert_not_called()
 
+    def test_mipps_timeout_or_spawn_error_does_not_stop_charger_mode(self):
+        helper = load_helper()
+        with patch.object(helper.os.path, "exists", return_value=True), \
+             patch.object(helper.subprocess, "run") as run:
+            for failure in (subprocess.TimeoutExpired("flock", 20), OSError("failed")):
+                run.side_effect = failure
+                self.assertFalse(helper.run_mipps_auth())
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

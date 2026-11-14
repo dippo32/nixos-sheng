@@ -2,21 +2,34 @@
 +++ b/xiaomi-charger-mode
 @@ -25,0 +26 @@
 +SCREEN_TIMEOUT_SECS = 10.0
-@@ -472,0 +474 @@
+@@ -438,4 +439,8 @@
+-    result = subprocess.run(
+-        [flock, "-n", "-E", "0", "/run/xiaomi-mipps-auth.lock", auth, "--timeout", "4"],
+-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+-        text=True, errors="replace", timeout=20, check=False)
++    try:
++        result = subprocess.run(
++            [flock, "-n", "-E", "0", "/run/xiaomi-mipps-auth.lock", auth, "--timeout", "4"],
++            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
++            text=True, errors="replace", timeout=20, check=False)
++    except (OSError, subprocess.SubprocessError):
++        log("xiaomi-mipps-auth failed or timed out; continuing charger mode")
++        return False
+@@ -472,0 +478 @@
 +    blank_deadline = None
-@@ -507,0 +510 @@
+@@ -507,0 +514 @@
 +                            blank_deadline = None
-@@ -511,0 +515 @@
+@@ -511,0 +519 @@
 +                            blank_deadline = None
-@@ -553 +557 @@
+@@ -553 +561 @@
 -            draw_screen("CHARGING", full=not screen_drawn)
 +            drawn = draw_screen("CHARGING", full=not screen_drawn)
-@@ -554,0 +559,4 @@
+@@ -554,0 +563,4 @@
 +            # Start the timer after the first successful frame; refreshing
 +            # battery information must not keep the screen lit indefinitely.
 +            if drawn and blank_deadline is None:
 +                blank_deadline = now + SCREEN_TIMEOUT_SECS
-@@ -555,0 +564,13 @@
+@@ -555,0 +568,13 @@
 +
 +        # Never blank under a held key: a long press must continue booting.
 +        if display_on and blank_deadline is not None and now >= blank_deadline and power_down_since is None:
