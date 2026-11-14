@@ -57,7 +57,11 @@ confirmed that one tested website stayed signed in after closing and reopening
 LibreWolf. Other sites, expiry policies, and upgrades still need their own tests.
 Maliit was also tried on the logged-in desktop. A user-specific landscape
 height of 0.31 of the screen was reported comfortable as a temporary layout;
-the requested split layout is a separate KBoard experiment.
+the requested split layout was then tested with KBoard. The owner confirmed
+split keys in landscape, joined keys in portrait, typing in landscape, and
+comfortable key height. Key sounds were disabled at the owner's request.
+KBoard's login-greeter and lock-screen behavior still require separate tests;
+the existing login keyboard and Maliit have not been removed.
 
 Builds, the restore and GUI launch checks do not establish all hardware
 functionality. The fingerprint
@@ -87,9 +91,20 @@ not blank automatically in this generation.
 
 An automatic screen timeout and authentication-error handling were built and
 passed 16 mocked tests in [run 43580952938](https://github.com/dippo32/nixos-sheng/actions/runs/43580952938).
-The candidate generation was registered for the next boot, but the screen
-timeout has not yet been tested on the tablet. Synchronous charger
-authentication can delay the timer and Power handling while it runs.
+The candidate generation was registered and tested on the tablet. The owner
+confirmed that the screen blanked automatically on charger insertion, and that
+a short Power press displayed it again followed by another automatic blank.
+Synchronous charger authentication can delay the timer and Power handling while
+it runs.
+
+After continuing to NixOS from the charger screen, the accelerometer was not
+detected and automatic rotation was unavailable. The sensor daemon had started
+only after the long-running charger service released `basic.target`; QMI service
+400 was absent. Restarting only the userspace sensor services did not recover
+it. After a normal restart, the accelerometer and automatic rotation returned,
+and the owner confirmed correct display and touch rotation. An early-sensor
+startup candidate is being investigated; causation and a permanent fix still
+need testing through another charger-to-desktop transition.
 
 ## Device validation still required
 
@@ -100,8 +115,8 @@ authentication can delay the timer and Power handling while it runs.
    windows, including sign-in, link handling and persistence.
 3. Test on-screen keyboard sizing, automatic display/hiding, rotation and lock
    screen; retain an alternative control path.
-4. Test the newly registered automatic charger-screen timeout, unplug behavior,
-   charger authentication and charging power; measure suspend separately.
+4. Test charger unplug behavior, authentication, charging power, and the
+   pending fix for rotation after charger boot; measure suspend separately.
 5. Compare camera sensors, focus controls, selected resolution and color in the
    same conditions before changing calibration or claiming improved quality.
 
