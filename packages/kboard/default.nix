@@ -12,7 +12,7 @@
   wayland-protocols,
   libxkbcommon,
   hunspell,
-  SDL3,
+  sdl3,
   systemd,
 }:
 let
@@ -37,7 +37,7 @@ stdenv.mkDerivation {
     kdePackages.kguiaddons kdePackages.kwindowsystem kdePackages.kdbusaddons
     kdePackages.kirigami kdePackages.kcrash kdePackages.kservice
     kdePackages.qqc2-desktop-style
-    wayland wayland-protocols libxkbcommon hunspell SDL3 systemd
+    wayland wayland-protocols libxkbcommon hunspell sdl3 systemd
   ];
 
   # Supply the fixed upstream whisper source locally: CMake must not download
