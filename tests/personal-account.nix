@@ -48,7 +48,7 @@ assert c.services.displayManager.sddm.enable;
 assert c.services.displayManager.sddm.wayland.enable;
 assert c.services.displayManager.sddm.wayland.compositor == "kwin";
 assert
-  builtins.match ".*--inputmethod .*/bin/kboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
+  builtins.match ".*--inputmethod .*/bin/kboard-sddm.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
   != null;
 assert
   builtins.match ".*InputMethod=.*/share/applications/org.devl0rd.kboard.desktop.*"

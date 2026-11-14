@@ -3,6 +3,13 @@
 { lib, pkgs, ... }:
 let
   kboard = pkgs.callPackage ../packages/kboard { };
+  # The SDDM greeter runs as a separate user and its XDG_CONFIG_DIRS is not
+  # guaranteed to include /etc/xdg. Match the tested explicit config-home
+  # arrangement without changing the logged-in user's settings.
+  kboardGreeter = pkgs.writeShellScriptBin "kboard-sddm" ''
+    export XDG_CONFIG_HOME=/etc/xdg
+    exec ${lib.getExe kboard} "$@"
+  '';
 in
 {
   imports = [
@@ -33,7 +40,7 @@ in
   services.shengSerialConsole.enable = lib.mkForce false;
 
   services.flatpak.enable = true;
-  sheng.virtualKeyboard.package = kboard;
+  sheng.virtualKeyboard.package = kboardGreeter;
   # Flatpak's supported static remote mechanism includes the upstream signing
   # key in the image. Adding Flathub does not require network on first boot.
   environment.etc."flatpak/remotes.d/flathub.flatpakrepo".source = ./assets/flathub.flatpakrepo;
