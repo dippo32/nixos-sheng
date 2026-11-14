@@ -58,7 +58,7 @@ stdenv.mkDerivation {
     for test_name in testkeylayout clipboardhistorytest kboard-typing-predictiontest; do
       ctest --show-only | grep -Eq "Test +#[0-9]+: +$test_name$"
     done
-    dbus-run-session -- ctest --no-tests=error --verbose -R '^(testkeylayout|clipboardhistorytest|kboard-typing-predictiontest)$' | tee "$TMPDIR/kboard-check.log"
+    dbus-run-session --config-file=${dbus}/share/dbus-1/session.conf -- ctest --no-tests=error --verbose -R '^(testkeylayout|clipboardhistorytest|kboard-typing-predictiontest)$' | tee "$TMPDIR/kboard-check.log"
     if grep -Eq 'SKIP.*(private D-Bus session|isolated session)' "$TMPDIR/kboard-check.log"; then
       echo 'Clipboard D-Bus isolation test was skipped' >&2
       exit 1
