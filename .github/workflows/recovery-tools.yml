@@ -1,0 +1,80 @@
+name: recovery-tools
+
+on:
+  push:
+    branches: [codex/recovery-tools]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build static e2fsprogs from pinned nixpkgs
+        run: |
+          set -euo pipefail
+          nix build -L --impure --expr \
+            '(builtins.getFlake (toString ./.)).inputs.nixpkgs.legacyPackages.aarch64-linux.pkgsStatic.e2fsprogs' \
+            -o result-e2fs
+
+      - name: Check ELF architecture, linking and executable versions
+        run: |
+          set -euo pipefail
+          mkdir -p recovery-tools
+          for tool in e2fsck resize2fs debugfs tune2fs dumpe2fs; do
+            path=$(find -L result-e2fs -type f -name "$tool" -print -quit)
+            test -n "$path"
+            cp -L "$path" "recovery-tools/$tool"
+            chmod 755 "recovery-tools/$tool"
+            readelf -h "recovery-tools/$tool" | grep -Eq 'Machine:[[:space:]]+AArch64'
+            if readelf -lW "recovery-tools/$tool" | grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)'; then
+              echo "$tool unexpectedly requires an ELF interpreter" >&2; exit 1
+            fi
+            if readelf -dW "recovery-tools/$tool" | grep -Fq '(NEEDED)'; then
+              echo "$tool unexpectedly requires a shared library" >&2; exit 1
+            fi
+            # tune2fs prints its version even though it does not support -V.
+            if [ "$tool" = tune2fs ]; then
+              version=$("recovery-tools/$tool" -V 2>&1 || true)
+            else
+              version=$("recovery-tools/$tool" -V 2>&1)
+            fi
+            printf '%s\n' "$version" | grep -Eq "^$tool [0-9]+\\.[0-9]+"
+            printf '%s\n' "$version" >> recovery-tools/VERSIONS.txt
+          done
+
+      - name: Test orphan_file and offline resize on a disposable image
+        run: |
+          set -euo pipefail
+          image="$RUNNER_TEMP/ext4-test.img"
+          truncate -s 96M "$image"
+          /usr/sbin/mke2fs -q -F -t ext4 -O orphan_file "$image" 64M
+          recovery-tools/tune2fs -l "$image" | grep -F 'orphan_file'
+          recovery-tools/e2fsck -fn "$image"
+          recovery-tools/resize2fs "$image"
+          recovery-tools/e2fsck -fn "$image"
+          recovery-tools/dumpe2fs -h "$image" | grep -F 'orphan_file'
+          recovery-tools/debugfs -R stats "$image" 2>&1 | grep -F 'orphan_file'
+
+      - name: Prepare checksummed metadata
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > recovery-tools/REVISION.txt
+          python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["nixpkgs"]["locked"]["rev"])' > recovery-tools/NIXPKGS-REVISION.txt
+          (cd recovery-tools && sha256sum e2fsck resize2fs debugfs tune2fs dumpe2fs VERSIONS.txt REVISION.txt NIXPKGS-REVISION.txt > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sheng-recovery-e2fsprogs-aarch64-static
+          if-no-files-found: error
+          path: recovery-tools/
