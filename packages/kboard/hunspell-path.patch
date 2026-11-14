@@ -1,0 +1,22 @@
+--- a/src/typing/localeresolver.cpp
++++ b/src/typing/localeresolver.cpp
+@@ -101,7 +101,18 @@
+
+ QString hunspellFile(const QString &locale, const QString &suffix)
+ {
+-    return QStringLiteral("/usr/share/hunspell/%1.%2").arg(locale, suffix);
++    QStringList directories = qEnvironmentVariable("DICPATH").split(QLatin1Char(':'), Qt::SkipEmptyParts);
++    directories << QStringLiteral("/run/current-system/sw/share/hunspell")
++                << QStringLiteral("@KBOARD_HUNSPELL_DEFAULT@")
++                << QStringLiteral("/usr/share/hunspell");
++    for (const auto &directory : directories) {
++        const QString path = directory + QLatin1Char('/') + locale + QLatin1Char('.') + suffix;
++        if (QFileInfo::exists(path)) {
++            return path;
++        }
++    }
++    // Return the Nix fallback so the existing missing-dictionary error remains useful.
++    return QStringLiteral("@KBOARD_HUNSPELL_DEFAULT@/%1.%2").arg(locale, suffix);
+ }
+
+ QString dictionaryFile(const QString &language, const QString &suffix)
