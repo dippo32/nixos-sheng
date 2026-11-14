@@ -1,228 +1,55 @@
-name: build
+name: kboard-output-cache
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-  pull_request:
   workflow_dispatch:
-    inputs:
-      desktop_username:
-        description: "Desktop login username (initial password remains nixos)"
-        required: false
-        default: nixos
-        type: string
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
-  actions: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
-  build:
+  export:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    timeout-minutes: 90
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure desktop image username
-        env:
-          DESKTOP_USERNAME: ${{ inputs.desktop_username || 'nixos' }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$DESKTOP_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,30}$ || "$DESKTOP_USERNAME" == root ]]; then
-            echo "Invalid desktop username: use 1-31 lowercase letters, digits, _ or -, starting with a letter or _. root is not allowed." >&2
-            exit 1
-          fi
-          printf '{ userName = "%s"; }\n' "$DESKTOP_USERNAME" > image-settings.nix
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-            keep-env-derivations = true
-            keep-outputs = true
-
-      - name: Restore Nix store cache
-        uses: nix-community/cache-nix-action@v7
+      - name: Build and export the pinned output only
+        run: |
+          set -euo pipefail
+          ref='github:dippo32/nixos-sheng/4156114265133500d0616880ed04730c107abe31'
+          attr='packages.aarch64-linux.kboard-native'
+          remote_drv=$(nix eval --raw "$ref#$attr.drvPath")
+          local_drv=$(nix eval --raw ".#$attr.drvPath")
+          remote_out=$(nix eval --raw "$ref#$attr.outPath")
+          local_out=$(nix eval --raw ".#$attr.outPath")
+          test "$remote_drv" = "$local_drv"
+          test "$remote_out" = "$local_out"
+          nix build -L "$ref#kboard-native" -o result
+          test "$(readlink -f result)" = "$remote_out"
+          nix path-info "$remote_out" >/dev/null
+          mkdir -p kboard-output
+          printf '%s\n' '4156114265133500d0616880ed04730c107abe31' > kboard-output/source-commit.txt
+          printf '%s\n' "$remote_drv" > kboard-output/derivation-path.txt
+          printf '%s\n' "$remote_out" > kboard-output/output-path.txt
+          nix-store --query --references "$remote_out" > kboard-output/references.txt
+          nix-store --export "$remote_out" | zstd -T0 -3 -o kboard-output/kboard-output.nar.zst
+          (cd kboard-output && sha256sum kboard-output.nar.zst source-commit.txt derivation-path.txt output-path.txt references.txt > SHA256SUMS)
+      - name: Attest output and checksum manifest
+        uses: actions/attest@v4
         with:
-          primary-key: nix-aarch64-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix') }}
-          restore-prefixes-first-match: nix-aarch64-${{ runner.os }}-
-          gc-max-store-size-linux: 8G
-          purge: true
-          purge-created: 604800
-          purge-last-accessed: 604800
-          purge-primary-key: never
-
-      - name: Build U-Boot image
-        run: nix build -L .#u-boot -o result-uboot
-
-      - name: Verify and inspect boot.img
-        run: |
-          set -euo pipefail
-          test -f result-uboot/boot.img
-          ls -l result-uboot/boot.img
-          size=$(stat -L -c %s result-uboot/boot.img)
-          test "$size" -lt $((192 * 1024 * 1024))
-          nix shell nixpkgs#android-tools -c unpack_bootimg --boot_img result-uboot/boot.img --out bootimg-unpacked | tee bootimg-info.txt
-          grep -Fxq 'boot image header version: 2' bootimg-info.txt
-          grep -Fq 'kernel load address: 0x00008000' bootimg-info.txt
-          grep -Fq 'page size: 4096' bootimg-info.txt
-          grep -Fq 'root=PARTLABEL=userdata' bootimg-info.txt
-
-      - name: Build device userspace before compiling the kernel
-        run: |
-          set -euo pipefail
-          for package in fastrpc libssc iio-sensor-proxy sheng-sensors sheng-firmware-blobs alsa-ucm-sheng sheng-devauth sheng-thp sheng-pen-status sheng-keyboard-helper sheng-fingerprint sheng-mipps-auth sheng-charger-mode; do
-            nix build -L --no-link ".#$package"
-          done
-
-      - name: Assert kernel version
-        run: |
-          set -euo pipefail
-          v=$(nix eval --raw '.#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.version')
-          m=$(nix eval --raw '.#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.modDirVersion')
-          echo "kernel.version=$v modDirVersion=$m"
-          test "$v" = "7.3.4-sheng"
-          test "$m" = "7.3.4-sm8550"
-
-      - name: Restore kernel closure from a successful build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          kernel=$(nix eval --raw .#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.outPath)
-          if nix path-info "$kernel" >/dev/null 2>&1; then
-            exit 0
-          fi
-          if ! previous=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
-            echo "Kernel artifact discovery unavailable; building from source."
-            exit 0
-          fi
-          if [ -z "$previous" ] || ! gh run download "$previous" --repo "$GITHUB_REPOSITORY" --name sheng-kernel-closure --dir seed-kernel; then
-            echo "No previous kernel artifact; building from source."
-            exit 0
-          fi
-          (cd seed-kernel && sha256sum -c SHA256SUMS)
-          zstd -dc seed-kernel/sheng-kernel-closure.nar.zst | sudo "$(command -v nix-store)" --import > seed-kernel/imported-paths.txt
-
-      - name: Export kernel closure for device rebuilds
-        run: |
-          set -euo pipefail
-          nix build -L .#nixosConfigurations.sheng.config.boot.kernelPackages.kernel -o result-kernel
-          mkdir -p kernel-artifacts
-          nix path-info -r ./result-kernel > kernel-artifacts/store-paths.txt
-          nix-store --export $(cat kernel-artifacts/store-paths.txt) | zstd -T0 -3 -o kernel-artifacts/sheng-kernel-closure.nar.zst
-          nix eval --raw .#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.outPath > kernel-artifacts/kernel-path.txt
-          git rev-parse HEAD > kernel-artifacts/revision.txt
-          cp flake.lock kernel-artifacts/flake.lock
-          (cd kernel-artifacts && sha256sum sheng-kernel-closure.nar.zst > SHA256SUMS)
-
-      - name: Upload kernel closure
-        uses: actions/upload-artifact@v4
+          subject-path: |
+            kboard-output/kboard-output.nar.zst
+            kboard-output/SHA256SUMS
+      - name: Upload signed and checksummed output
+        uses: actions/upload-artifact@v6
         with:
-          name: sheng-kernel-closure
+          name: kboard-output-pinned-4156114
+          path: kboard-output/
           if-no-files-found: error
-          path: kernel-artifacts/
-
-      - name: Build and compare personal configuration templates
-        run: |
-          set -euo pipefail
-          nix build -L .#nixosConfigurations.sheng.config.system.build.toplevel -o result-system
-          for template in minimal flake-parts; do
-            nix build -L "./examples/$template#nixosConfigurations.sheng.config.system.build.toplevel" \
-              --no-update-lock-file -o "result-$template"
-            test "$(readlink -f "result-$template")" = "$(readlink -f result-system)"
-          done
-
-      - name: Export system closure for installation without reflashing
-        run: |
-          set -euo pipefail
-          mkdir -p system-artifacts
-          nix path-info -r ./result-system > system-artifacts/store-paths.txt
-          nix-store --export $(cat system-artifacts/store-paths.txt) | zstd -T0 -3 -o system-artifacts/sheng-system-closure.nar.zst
-          readlink -f result-system > system-artifacts/system-path.txt
-          readlink -f result-system/kernel > system-artifacts/kernel-path.txt
-          readlink -f result-system/dtbs > system-artifacts/dtb-path.txt
-          git rev-parse HEAD > system-artifacts/revision.txt
-          cp flake.lock system-artifacts/flake.lock
-          (cd system-artifacts && sha256sum sheng-system-closure.nar.zst > SHA256SUMS)
-
-      - name: Upload system closure
-        uses: actions/upload-artifact@v4
-        with:
-          name: sheng-system-closure
-          if-no-files-found: error
-          path: system-artifacts/
-
-      - name: Build rootfs image
-        run: nix build -L .#nixos -o result-image
-
-      - name: Verify and compress rootfs image
-        run: |
-          set -euo pipefail
-          img=result-image/sheng-rootfs.sparse.img
-          test -f "$img"
-          magic=$(od -An -tx1 -N4 "$img" | tr -d ' \n')
-          test "$magic" = "3aff26ed"
-          ls -lh "$img"
-          mkdir -p artifacts
-          cp result-uboot/boot.img artifacts/sheng-boot.img
-          nix shell nixpkgs#zstd -c zstd -T0 --long=27 -3 -f "$img" -o artifacts/sheng-rootfs.sparse.img.zst
-          ls -lh artifacts
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sheng-flashable
-          if-no-files-found: error
-          path: |
-            artifacts/sheng-boot.img
-            artifacts/sheng-rootfs.sparse.img.zst
-      - name: Verify desktop image accounts and audio defaults
-        run: nix eval --json --impure --expr 'import ./tests/desktop-images.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
-
-      - name: Build and upload KDE desktop rootfs
-        run: |
-          set -euo pipefail
-          nix build -L .#nixos-kde -o result-kde
-          img=result-kde/sheng-rootfs.sparse.img
-          test -f "$img"
-          mkdir -p kde-artifacts
-          cp result-uboot/boot.img kde-artifacts/sheng-boot.img
-          nix shell nixpkgs#zstd -c zstd -T0 --long=27 -3 -f "$img" -o kde-artifacts/sheng-rootfs-kde.sparse.img.zst
-      - name: Upload KDE desktop flashable
-        uses: actions/upload-artifact@v4
-        with:
-          name: sheng-kde-flashable
-          if-no-files-found: error
-          path: kde-artifacts/
-
-      - name: Build and upload GNOME desktop rootfs
-        run: |
-          set -euo pipefail
-          nix build -L .#nixos-gnome -o result-gnome
-          img=result-gnome/sheng-rootfs.sparse.img
-          test -f "$img"
-          mkdir -p gnome-artifacts
-          cp result-uboot/boot.img gnome-artifacts/sheng-boot.img
-          nix shell nixpkgs#zstd -c zstd -T0 --long=27 -3 -f "$img" -o gnome-artifacts/sheng-rootfs-gnome.sparse.img.zst
-      - name: Upload GNOME desktop flashable
-        uses: actions/upload-artifact@v4
-        with:
-          name: sheng-gnome-flashable
-          if-no-files-found: error
-          path: gnome-artifacts/
-      - name: Save Nix store cache on failure
-        if: failure()
-        uses: nix-community/cache-nix-action/save@v7
-        with:
-          primary-key: nix-aarch64-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix') }}
-          gc-max-store-size-linux: 8G
+          compression-level: 0
