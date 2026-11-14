@@ -21,6 +21,8 @@ assert builtins.match ".*NVT_LOG.*pr_debug.*" production.src.postPatch != null;
 assert builtins.match ".*GS_CONSOLE_BUF_SIZE.*" production.src.postPatch != null;
 assert production.version == diagnostic.version;
 assert production.modDirVersion == diagnostic.modDirVersion;
+assert production.version == "7.3.4-sheng";
+assert production.modDirVersion == "7.3.4-sm8550";
 {
   productionDisplayInstrumentation = false;
   legacyDiagnosticsAvailable = true;

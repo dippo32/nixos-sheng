@@ -29,8 +29,8 @@ let
   rawSrc = fetchFromGitHub {
     owner = "ianchb";
     repo = "sm8550-mainline";
-    rev = "1fb56e66091e71160d7c7f8e13b065d5b6ab8b8c"; # sheng-7.3.0
-    hash = "sha256-RMysYfL6Cq1Y+Q02pVkWjsbiLB51jpyoPCFu5ffv5hA=";
+    rev = "87ac0f2347eb433933841e6854950dd90e96e6b2"; # sheng-7.3.4
+    hash = "sha256-Qb1+c0fHaVlR6qw4Os7toXiRRk6q8j3yI1Q3ABEFeEI=";
   };
 
   # Bring-up diagnostics can add thousands of printk calls and extra panel
@@ -155,11 +155,11 @@ let
     '';
   };
 
-  version = "7.3.0-sheng";
+  version = "7.3.4-sheng";
 
   baseConfig = fetchurl {
-    url = "https://raw.githubusercontent.com/ianchb/debian-sheng/da1d2761dbc1ccaea0122f8b0c2dce2d52edaeb2/sm8550.config";
-    hash = "sha256-ZYg0G5l48cm/47BWrlAm/5LthBBLop9umcfRzkXI/Hg=";
+    url = "https://raw.githubusercontent.com/ianchb/debian-sheng/a93aaa1eff77a2bf0552b8dafaa35c1e0880317f/sm8550.config";
+    hash = "sha256-zbYP36hsihbw0UbJYcis+BvgpdNx5MRsdVJq8FW5JII=";
   };
 
   ourConfigFragment = builtins.toFile "sheng-extra.config" (
@@ -251,13 +251,13 @@ linuxManualConfig (
       ;
 
     # sm8550.config sets CONFIG_LOCALVERSION="-sm8550", so kernelrelease is
-    # 7.3.0-sm8550, not 7.3.0-sheng.
-    modDirVersion = "7.3.0-sm8550";
+    # 7.3.4-sm8550, not 7.3.4-sheng.
+    modDirVersion = "7.3.4-sm8550";
 
     allowImportFromDerivation = true;
 
     extraMeta = {
-      branch = "sheng-7.3.0";
+      branch = "sheng-7.3.4";
       description = "Mainline kernel for the Xiaomi Pad 6S Pro (sheng, SM8550P)";
     };
   }

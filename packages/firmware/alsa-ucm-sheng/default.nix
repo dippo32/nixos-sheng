@@ -23,6 +23,8 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$out/share/alsa/ucm2/conf.d/sm8550"
     ln -s ../../Xiaomi/sheng/Xiaomi-Pad6SPro.conf \
       "$out/share/alsa/ucm2/conf.d/sm8550/Xiaomi-Pad6SPro.conf"
+    ln -s Xiaomi-Pad6SPro.conf \
+      "$out/share/alsa/ucm2/conf.d/sm8550/xiaomi-XiaomiPad6SPro12.4.conf"
 
     runHook postInstall
   '';

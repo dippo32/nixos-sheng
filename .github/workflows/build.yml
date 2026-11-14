@@ -90,8 +90,8 @@ jobs:
           v=$(nix eval --raw '.#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.version')
           m=$(nix eval --raw '.#nixosConfigurations.sheng.config.boot.kernelPackages.kernel.modDirVersion')
           echo "kernel.version=$v modDirVersion=$m"
-          test "$v" = "7.3.0-sheng"
-          test "$m" = "7.3.0-sm8550"
+          test "$v" = "7.3.4-sheng"
+          test "$m" = "7.3.4-sm8550"
 
       - name: Restore kernel closure from a successful build
         env:
