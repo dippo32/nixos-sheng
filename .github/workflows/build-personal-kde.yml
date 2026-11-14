@@ -46,6 +46,7 @@ jobs:
               --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
           done
           python3 tests/generation-retention.py
+          python3 tests/extlinux-generations.py
           bash tests/kernel-closure-cache.sh
           nix build --impure --no-link --expr '(import ./tests/personal-rotation.nix { flake = builtins.getFlake ("git+file://" + toString ./.); system = "aarch64-linux"; }).scriptTests'
           nix shell --inputs-from . nixpkgs#android-tools nixpkgs#e2fsprogs nixpkgs#zstd \
@@ -267,7 +268,7 @@ jobs:
             'Production display path without added bring-up logging; ZSTD zram and basic file indexing.' \
             'Charger helper re-entry/enqueue fixes and staged PM diagnostics included.' \
             'Bring-up USB serial gadget disabled at boot; actual Type-C roles require device testing.' \
-            'Direct-boot U-Boot; older system generation links are pruned after matching booted/current/profile checks.' \
+            'Direct-boot U-Boot; system generation links are retained for manual rollback.' \
             'Account: dippo / Dippo Shelan. Login is locked until private local credential provisioning.' \
             'Native LibreWolf is included; its privacy defaults are unchanged.' \
             'ChatGPT and Antigravity native packages are optional user-profile installs.' \

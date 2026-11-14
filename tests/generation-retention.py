@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the actual pruning logic against disposable links and a fake nix-env."""
+"""Exercise the legacy opt-in pruning script; no default service invokes it."""
 
 import os
 from pathlib import Path

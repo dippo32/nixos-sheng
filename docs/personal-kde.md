@@ -32,12 +32,13 @@ GNOME and dual-boot profiles keep their defaults; personal changes are separate.
 ## Boot, rotation and responsiveness
 
 `u-boot-personal` starts `bootlinux` directly without the generation menu.
-The internal current NixOS profile still exists. After boot, a guarded timer
-removes older system generation links only when booted/current/profile targets
-match. It does not prune user profiles or a pending boot selection; normal GC
-runs separately each week. Shell checks and Nix profile deletion are not one
-atomic transaction with an unrelated concurrent rebuild. Nix protects the selected
-profile and runtime GC roots; this is not a full health check or rollback guarantee.
+System and user profile generation links are retained; weekly garbage collection
+only removes unreachable store paths. The extlinux installer stages up to ten
+generation entries and their boot files, but direct-boot U-Boot does not expose a
+button-driven generation picker. While a system is running, a previous generation
+can be selected with NixOS rollback tools; recovery without a working system
+requires a separate tested recovery path. Retaining a generation does not prove
+that it can boot or that its hardware functions work.
 
 The personal Wayland session sets the active internal panel's auto-rotation
 policy to Always. It discovers the output, waits boundedly for SSC availability,

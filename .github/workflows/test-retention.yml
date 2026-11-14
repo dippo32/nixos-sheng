@@ -1,0 +1,26 @@
+name: test-retention
+
+on:
+  push:
+    branches: [codex/preserve-system-generations]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate retention and test extlinux generation staging
+        run: |
+          nix eval --json --impure --option allow-import-from-derivation false \
+            --expr 'import ./tests/generation-retention.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
+          python3 tests/generation-retention.py
+          python3 tests/extlinux-generations.py
