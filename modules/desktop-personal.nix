@@ -13,6 +13,7 @@ let
 in
 {
   imports = [
+    ./personal-plasma-no-keyboard.nix
     ./personal-performance.nix
     ./personal-generation-retention.nix
     ./personal-account.nix

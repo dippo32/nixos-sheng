@@ -16,9 +16,12 @@ system defaults are honored by the SDDM session. Test those on the tablet
 before treating this profile as ready for routine use. Preserve another tested
 access path and working boot generation until the login test passes.
 
-Plasma Keyboard and Qt Virtual Keyboard remain dependencies: the pinned
-NixOS Plasma module includes both in its required packages and Qt Virtual
-Keyboard is also among SDDM's extra packages. The Plasma `excludePackages`
-option filters optional packages, not these required ones. Removing their
-package references requires a separately tested change to the Plasma module
-and dependency closure; this candidate does not claim to remove them.
+The personal-only module replaces exactly one line in the pinned upstream
+Plasma module to omit Plasma Keyboard from `environment.systemPackages`.
+The replacement checks that the expected line occurs exactly once and fails
+evaluation on upstream changes; each nixpkgs update needs review. It leaves
+all other module behavior and the non-personal configurations unchanged.
+This does not remove old generations or their store paths; keep the known-good
+generation for rollback. `qtvirtualkeyboard` remains because KWin, Plasma,
+and SDDM reference it as a runtime dependency. Omitting the Plasma Keyboard
+from the system package list alone does not prove the store closure is clear.

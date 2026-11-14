@@ -2,7 +2,7 @@ name: test-kboard-greeter
 
 on:
   push:
-    branches: [codex/kboard-greeter-candidate]
+    branches: [codex/plasma-no-keyboard-profile]
   workflow_dispatch:
 
 permissions:

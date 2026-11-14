@@ -34,7 +34,7 @@ assert
     c.environment.etc."xdg/kwinrc".text != null;
 assert builtins.elem "flatpak" packages;
 assert builtins.elem "discover" packages;
-assert builtins.elem "plasma-keyboard" packages;
+assert !(builtins.elem "plasma-keyboard" packages);
 assert builtins.elem "qtvirtualkeyboard" packages;
 assert builtins.elem "kboard" packages;
 assert !(builtins.elem "maliit-keyboard" packages);
