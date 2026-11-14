@@ -228,6 +228,7 @@
             # system image. The project's pinned pkgs permits these unfree apps.
             chatgpt-native = pkgs.chatgpt;
             antigravity-native = pkgs.callPackage ./packages/antigravity-app { };
+            kboard-native = pkgs.callPackage ./packages/kboard { };
 
             u-boot = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;
