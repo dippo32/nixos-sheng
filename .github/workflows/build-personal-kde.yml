@@ -51,8 +51,8 @@ jobs:
           nix shell --inputs-from . nixpkgs#android-tools nixpkgs#e2fsprogs nixpkgs#zstd \
             -c python3 tests/private-image-provision.py
 
-      - name: Build and test charger helpers before the kernel
-        run: nix build -L --no-link .#sheng-mipps-auth .#sheng-charger-mode
+      - name: Build and test vendor helpers before the kernel
+        run: nix build -L --no-link .#sheng-mipps-auth .#sheng-charger-mode .#fastrpc
 
       - name: Restore matching kernel closure from this fork or upstream
         env:
@@ -94,7 +94,7 @@ jobs:
             if [ "$repository" = "$GITHUB_REPOSITORY" ]; then
               workflow=build-personal-kde.yml
               branches=("$GITHUB_REF_NAME")
-              for fallback in codex/upstream-kernel-audio codex/kde-personal-flatpak-power; do
+              for fallback in codex/native-librewolf codex/upstream-kernel-audio codex/kde-personal-flatpak-power; do
                 if [ "$GITHUB_REF_NAME" != "$fallback" ]; then
                   branches+=("$fallback")
                 fi
@@ -271,8 +271,9 @@ jobs:
             'Account: dippo / Dippo Shelan. Login is locked until private local credential provisioning.' \
             'Native LibreWolf is included; its privacy defaults are unchanged.' \
             'ChatGPT and Antigravity native packages are optional user-profile installs.' \
-            'THIS IS AN UNPROVISIONED BASE. Do not flash before private credential/app assembly.' \
-            'Charging settings remain unchanged from the installed candidate.' \
+            'THIS IS AN UNPROVISIONED BASE. Provision the account privately before first normal boot.' \
+            'Native desktop applications may be installed after login; the legacy Flatpak seed is optional.' \
+            'Charger userspace is guarded; offline charger boot remains a separate opt-in test.' \
             'A successful build does not verify device suspend/resume or battery life.' \
             > personal-kde-artifacts/BUILD-INFO.txt
           (cd personal-kde-artifacts && sha256sum \

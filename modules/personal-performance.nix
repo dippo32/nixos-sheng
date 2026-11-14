@@ -2,9 +2,9 @@
 # frequency limits, thermal protection, or the kernel's swappiness default.
 { ... }:
 {
-  # The locked Debian sheng config (da1d2761dbc1) enables ZRAM=m, SWAP=y and
+  # The locked Debian sheng config (a93aaa1eff77) enables ZRAM=m, SWAP=y and
   # ZRAM_BACKEND_ZSTD=y; its ZRAM_BACKEND_LZ4 is explicitly disabled.
-  # https://github.com/ianchb/debian-sheng/blob/da1d2761dbc1ccaea0122f8b0c2dce2d52edaeb2/sm8550.config
+  # https://github.com/ianchb/debian-sheng/blob/a93aaa1eff77a2bf0552b8dafaa35c1e0880317f/sm8550.config
   # memoryMax is bytes; memoryPercent describes the uncompressed swap capacity,
   # not an upfront RAM reservation. Cap it at 2 GiB to limit this first candidate.
   zramSwap = {
