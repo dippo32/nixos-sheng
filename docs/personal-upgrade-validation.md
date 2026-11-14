@@ -5,7 +5,9 @@ while incorporating the upstream Linux 7.3.4 source/configuration and ALSA card
 name alias. Keyboard and pen accessory helpers remain disabled in the personal
 profile; shared touch input remains enabled.
 
-LibreWolf is a native ARM64 package. Its privacy preferences are unchanged.
+LibreWolf is a native ARM64 package. The base image retains its upstream
+privacy preferences. On the tested tablet, the owner subsequently chose a
+user-level override to retain cookies and site data when the browser closes.
 ChatGPT Desktop and Google Antigravity App 2.32.0 are separate native profile
 outputs (`chatgpt-native` and `antigravity-native`). Antigravity App uses the
 `antigravity-hub` wrapper and is distinct from Antigravity IDE and CLI.
@@ -49,6 +51,15 @@ Antigravity App were installed in the user's native profile and the user
 confirmed that both windows opened; their sign-in and other integration remain
 to be tested.
 
+The owner selected retention of cookies and site data for all sites. The local
+LibreWolf override changes only `privacy.clearOnShutdown_v2.cookiesAndStorage`
+to `false` as a default; the source image itself is unchanged. The owner
+confirmed that one tested website stayed signed in after closing and reopening
+LibreWolf. Other sites, expiry policies, and upgrades still need their own tests.
+Maliit was also tried on the logged-in desktop. A user-specific landscape
+height of 0.31 of the screen was reported comfortable as a temporary layout;
+the requested split layout is a separate KBoard experiment.
+
 Builds, the restore and GUI launch checks do not establish all hardware
 functionality. The fingerprint
 driver tests were skipped due to missing introspection dependencies; the
@@ -72,9 +83,8 @@ actual charging, power consumption, temperature or key/firmware behavior.
 1. Verify normal reboot and the recovery path after account provisioning and
    first desktop login. Do not resize the image at build time or rewrite the
    partition table to fix a smaller filesystem.
-2. Verify native browser and both desktop applications beyond opening windows,
-   including sign-in, link handling and login persistence. Do not infer cookie
-   behavior solely from the packaging format.
+2. Verify more native-browser sites and both desktop applications beyond opening
+   windows, including sign-in, link handling and persistence.
 3. Test on-screen keyboard sizing, automatic display/hiding, rotation and lock
    screen; retain an alternative control path.
 4. Measure battery charging and suspend on the running system, then test the

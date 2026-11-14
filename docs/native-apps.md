@@ -52,10 +52,11 @@ login data. A NixOS rebuild does not install these optional profile entries.
 
 The legacy private Flatpak seed remains optional. Native LibreWolf is included
 in the personal system image separately from these optional user-profile apps.
-Its existing privacy defaults are unchanged; testing must establish whether
-desired site logins persist, and users can change site-specific settings in the
-browser. The system no longer forces `codex:` or
+The image retains its upstream privacy defaults. On the tested personal system,
+the owner later chose a user-level override to keep cookies and site data; one
+site remained logged in after a browser restart. Other sites and expiry policies
+remain untested. The system no longer forces `codex:` or
 `antigravity-ide:` links to the legacy Flatpak desktop IDs; verify link handling
 and desktop integration after installing the chosen native applications.
-Neither GUI's launch, sign-in, URI handling, updates, login persistence,
-extensions, or device access have been tested on the tablet.
+The owner confirmed both GUIs opened on the tablet; sign-in, URI handling,
+updates, login persistence, extensions, and device access remain untested.
