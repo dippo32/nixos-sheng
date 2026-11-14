@@ -13,6 +13,7 @@
   wayland-protocols,
   libxkbcommon,
   hunspell,
+  hunspellDicts,
   sdl3,
   systemd,
 }:
@@ -31,7 +32,12 @@ stdenv.mkDerivation {
     hash = "sha256-dWSjyFBfvmuWelNT0aAmV5JTj/p8Z5+tGu7csVu62Yo=";
   };
 
-  patches = [ ./privacy-defaults.patch ];
+  patches = [ ./privacy-defaults.patch ./hunspell-path.patch ];
+
+  postPatch = ''
+    substituteInPlace src/typing/localeresolver.cpp \
+      --replace-fail @KBOARD_HUNSPELL_DEFAULT@ ${hunspellDicts.en_US}/share/hunspell
+  '';
 
   nativeBuildInputs = [ cmake ninja pkg-config dbus kdePackages.extra-cmake-modules qt6.wrapQtAppsHook ];
   buildInputs = [
