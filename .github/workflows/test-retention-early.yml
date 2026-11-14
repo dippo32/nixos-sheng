@@ -1,0 +1,49 @@
+name: test-retention-early
+
+on:
+  push:
+    branches: [codex/retention-early-integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate combined system configuration
+        run: |
+          set -euo pipefail
+          for check in generation-retention personal-early-sensors personal-kde personal-account personal-removable-apps; do
+            nix eval --json --impure --option allow-import-from-derivation false \
+              --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
+          done
+          python3 tests/generation-retention.py
+          python3 tests/extlinux-generations.py
+      - name: Exercise early boot transaction graph
+        run: |
+          set -euo pipefail
+          nix eval --json --impure --option allow-import-from-derivation false --expr '
+            let
+              f = builtins.getFlake ("git+file://" + toString ./.);
+              c = f.nixosConfigurations.sheng-kde-personal.config;
+              pick = s: {
+                inherit (s) after before wants requires conflicts;
+                defaultDependencies = s.unitConfig.DefaultDependencies or true;
+              };
+            in {
+              registry = (pick c.systemd.services.sheng-sensors-data) // {
+                requiresMountsFor = c.systemd.services.sheng-sensors-data.unitConfig.RequiresMountsFor;
+              };
+              rpc = pick c.systemd.services.adsprpcd-sensorspd;
+              charger = pick c.systemd.services.xiaomi-charger-mode;
+            }
+          ' > "$RUNNER_TEMP/combined-units.json"
+          python3 tests/early-sensors-graph.py "$RUNNER_TEMP/combined-units.json"
