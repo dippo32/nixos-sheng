@@ -175,6 +175,10 @@ Sniffs the magic first (Android sparse `3aff26ed` at offset 0, or ext4 `53ef` at
 and refuses anything else. Requires exactly one fastboot device, and makes you type `wipe`.
 The partition name `userdata` is a literal in the script and is never derived from an
 argument, so no input can redirect a write to `xbl` or `abl`.
+It does not verify the expanded data on the device. A fastboot success was
+observed with missing filesystem metadata in a personal-image installation;
+follow the readback and offline checks in [rootfs flash verification](rootfs-flash-verification.md)
+before booting, and do not assume an erase alone proves the write succeeded.
 
 ### `soak` and `sheng-mdss-status`
 

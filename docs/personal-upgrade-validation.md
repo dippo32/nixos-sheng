@@ -35,10 +35,22 @@ is retained until a device test verifies the replacement.
 - The static filesystem tools passed
   [run 43571313139](https://github.com/dippo32/nixos-sheng/actions/runs/43571313139).
   The built e2fsprogs version is 1.47.4; the version and SHA-256 of the copy
-  checked in TWRP matched the built tool. This confirms the tool copy, not a
-  completed filesystem restore or resize.
+  checked in TWRP matched the built tool.
 
-Builds and tool checks do not establish hardware functionality. The fingerprint
+## Device restore evidence
+
+The 2026-11-14 installation initially exposed incomplete data after fastboot
+reported success. A recovery rewrite passed full expanded-image readback and
+offline filesystem checks before and after growing the existing partition; see
+[rootfs flash verification](rootfs-flash-verification.md) for the details and
+limits of that evidence. NixOS subsequently booted the expected 7.3.4 kernel,
+and the running root filesystem reported 229 GiB total. ChatGPT Desktop and
+Antigravity App were installed in the user's native profile and the user
+confirmed that both windows opened; their sign-in and other integration remain
+to be tested.
+
+Builds, the restore and GUI launch checks do not establish all hardware
+functionality. The fingerprint
 driver tests were skipped due to missing introspection dependencies; the
 assembling test also lacked dependencies. Runtime validation is still required.
 
@@ -57,18 +69,17 @@ actual charging, power consumption, temperature or key/firmware behavior.
 
 ## Device validation still required
 
-1. Verify the image and physical partition, restore the root filesystem, and
-   compare its final filesystem size against the containing partition. Do not
-   resize the image at build time or rewrite the partition table to fix a
-   smaller filesystem.
-2. Provision the account privately and verify login, normal reboot and recovery.
-3. Verify native browser and both desktop applications, link handling and login
-   persistence. Do not infer cookie behavior solely from the packaging format.
-4. Test on-screen keyboard sizing, automatic display/hiding, rotation and lock
+1. Verify normal reboot and the recovery path after account provisioning and
+   first desktop login. Do not resize the image at build time or rewrite the
+   partition table to fix a smaller filesystem.
+2. Verify native browser and both desktop applications beyond opening windows,
+   including sign-in, link handling and login persistence. Do not infer cookie
+   behavior solely from the packaging format.
+3. Test on-screen keyboard sizing, automatic display/hiding, rotation and lock
    screen; retain an alternative control path.
-5. Measure battery charging and suspend on the running system, then test the
+4. Measure battery charging and suspend on the running system, then test the
    charger boot candidate temporarily, including Power escape and unplug.
-6. Compare camera sensors, focus controls, selected resolution and color in the
+5. Compare camera sensors, focus controls, selected resolution and color in the
    same conditions before changing calibration or claiming improved quality.
 
 EFI remains a separate experiment. Upstream temporary boot evidence is useful,

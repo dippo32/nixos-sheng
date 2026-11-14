@@ -217,8 +217,12 @@ fastboot erase dtbo_ab
 fastboot flash boot_ab  boot.img
 fastboot erase userdata
 fastboot flash userdata sheng-rootfs.sparse.img
-fastboot reboot
 ```
+
+Before booting, verify the expanded image against the unmounted partition and
+check the filesystem as described in [rootfs flash verification](rootfs-flash-verification.md).
+One observed flash returned success but left image metadata unwritten; a fastboot
+success message or erase alone does not establish that the contents are intact.
 
 > **Do not skip `fastboot erase userdata`.** The rootfs is an Android sparse image,
 > which is mostly `DONT_CARE` chunks, and this bootloader's sparse writer leaves those
@@ -252,6 +256,8 @@ nix run .#flash-rootfs      # userdata from ./result/sheng-rootfs.sparse.img
 > **Note** — `flash-rootfs` does erase `userdata` for you, for the reason above, and asks
 > you to type `wipe` to confirm. Neither script erases `dtbo`; do that by hand, once, on
 > a first install.
+> The script does not perform post-flash readback or an offline filesystem check;
+> follow [rootfs flash verification](rootfs-flash-verification.md) before booting.
 
 > **If the device boots into fastboot on its own and stays there**, the A/B retry counter
 > ran out. Recover with `fastboot set_active b && fastboot reboot`. Once NixOS is up,
