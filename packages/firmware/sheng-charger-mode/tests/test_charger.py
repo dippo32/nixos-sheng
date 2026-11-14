@@ -157,5 +157,97 @@ class ChargerSafety(unittest.TestCase):
             self.assertFalse(self.helper.in_charger_boot())
 
 
+    def make_screen_harness(self, events):
+        """Simulate power, a discovered key, and an actual mutable backlight."""
+        self.helper.battery_info_ready.return_value = True
+        self.helper.external_power_present.return_value = True
+        self.helper.typec_attached.return_value = True
+        self.helper.open_power_key_events.return_value = {42: "power"}
+        self.helper.find_backlight.return_value = "/test-backlight"
+        self.helper.backlight_restore_value.return_value = 80
+        self.helper.draw_screen.return_value = True
+        brightness = {"value": 80}
+        changes = []
+        self.mock("backlight_brightness", side_effect=lambda _: brightness["value"])
+
+        def set_brightness(_, value):
+            brightness["value"] = value
+            changes.append((self.clock.now, value))
+            return True
+
+        self.mock("set_backlight", side_effect=set_brightness)
+        poweroff = self.mock("request_poweroff", return_value=True)
+        pending = list(events)
+
+        def next_events(_):
+            return pending.pop(0)[1] if pending and self.clock.now >= pending[0][0] else []
+
+        self.helper.read_power_key_events.side_effect = next_events
+        return brightness, changes, poweroff
+
+    def test_screen_blanks_after_ten_seconds_and_long_hold_restores_for_boot(self):
+        brightness, changes, poweroff = self.make_screen_harness([(11.0, [1])])
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0, 80])
+        self.assertGreaterEqual(changes[0][0], 9.9)
+        self.assertLessEqual(changes[0][0], 10.2)
+        self.assertEqual(brightness["value"], 80)
+        poweroff.assert_not_called()
+
+    def test_short_press_wakes_and_screen_blanks_again_after_ten_seconds(self):
+        events = [(10.5, [1]), (10.7, [0]), (21.5, [1])]
+        brightness, changes, poweroff = self.make_screen_harness(events)
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0, 80, 0, 80])
+        self.assertGreaterEqual(changes[2][0] - changes[1][0], 9.9)
+        self.assertLessEqual(changes[2][0] - changes[1][0], 10.2)
+        self.assertEqual(brightness["value"], 80)
+        poweroff.assert_not_called()
+
+    def test_timeout_starts_when_delayed_battery_display_becomes_ready(self):
+        brightness, changes, poweroff = self.make_screen_harness([(15.0, [1])])
+        self.helper.battery_info_ready.side_effect = lambda: self.clock.now >= 4.0
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0, 80])
+        self.assertGreaterEqual(changes[0][0], 13.9)
+        self.assertLessEqual(changes[0][0], 14.2)
+        self.assertEqual(brightness["value"], 80)
+        poweroff.assert_not_called()
+
+    def test_short_press_can_blank_early_and_long_press_restores_for_boot(self):
+        brightness, changes, poweroff = self.make_screen_harness([(0.5, [1]), (0.7, [0]), (1.0, [1])])
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0, 80])
+        self.assertLess(changes[0][0], 1.0)
+        self.assertEqual(brightness["value"], 80)
+        poweroff.assert_not_called()
+
+    def test_unplug_after_auto_blank_still_requests_poweroff(self):
+        brightness, changes, poweroff = self.make_screen_harness([])
+        self.helper.external_power_present.side_effect = lambda: self.clock.now < 11.0
+        self.helper.typec_attached.side_effect = lambda: self.clock.now < 11.0
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0])
+        self.assertEqual(brightness["value"], 0)
+        self.assertGreaterEqual(self.clock.now, 11.0 + self.helper.UNPLUG_CONFIRM_SECS)
+        poweroff.assert_called_once_with("external power removed, powering off")
+
+    def test_held_power_key_at_timeout_never_blanks_before_normal_boot(self):
+        brightness, changes, poweroff = self.make_screen_harness([(9.0, [1])])
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual(changes, [])
+        self.assertEqual(brightness["value"], 80)
+        poweroff.assert_not_called()
+
+    def test_timeout_starts_when_battery_display_is_ready(self):
+        brightness, changes, poweroff = self.make_screen_harness([(15.0, [1])])
+        self.helper.battery_info_ready.side_effect = lambda: self.clock.now >= 4.0
+        self.assertEqual(self.helper.main(), 0)
+        self.assertEqual([value for _, value in changes], [0, 80])
+        self.assertGreaterEqual(changes[0][0], 13.9)
+        self.assertLessEqual(changes[0][0], 14.2)
+        poweroff.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

@@ -21,7 +21,7 @@ stdenvNoCC.mkDerivation {
     hash = "sha256-g0IfrZzQ98Uwd2kXEZeYt9Zwf0dzTw12nyoDMgL69WQ=";
   };
 
-  patches = [ ./charger-safety.patch ];
+  patches = [ ./charger-safety.patch ./charger-screen-timeout.patch ];
   nativeCheckInputs = [ python3 ];
   doCheck = true;
   checkPhase = ''
