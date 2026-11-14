@@ -1,0 +1,94 @@
+name: charger-ci
+
+on:
+  push:
+    branches: [codex/charger-mode-candidate]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  charger-candidate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Check default U-Boot derivation against pre-option parent
+        run: |
+          set -euo pipefail
+          base=952ec95
+          git worktree add --detach "$RUNNER_TEMP/charger-base" "$base"
+          default_base=$(nix eval --raw "path:$RUNNER_TEMP/charger-base#u-boot-personal.drvPath")
+          default_current=$(nix eval --raw .#u-boot-personal.drvPath)
+          candidate=$(nix eval --raw .#u-boot-personal-charger-test.drvPath)
+          printf 'base=%s\ndefault=%s\ncandidate=%s\n' "$default_base" "$default_current" "$candidate"
+          test "$default_base" = "$default_current"
+          test "$candidate" != "$default_current"
+
+      - name: Build and test charger userspace
+        run: nix build -L .#sheng-charger-mode -o result-charger
+
+      - name: Verify charger service unit
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/charger-unit-stubs"
+          printf '[Unit]\nDescription=Display manager stub for offline verification\n[Service]\nExecStart=/bin/true\n' > "$RUNNER_TEMP/charger-unit-stubs/display-manager.service"
+          SYSTEMD_UNIT_PATH="$RUNNER_TEMP/charger-unit-stubs:" systemd-analyze verify --man=no result-charger/lib/systemd/system/xiaomi-charger-mode.service
+
+      - name: Build opt-in charger U-Boot
+        run: nix build -L .#u-boot-personal-charger-test -o result-uboot-charger
+
+      - name: Verify boot image and embedded environment
+        run: |
+          set -euo pipefail
+          test -s result-uboot-charger/boot.img
+          size=$(stat -L -c %s result-uboot-charger/boot.img)
+          test "$size" -lt $((192 * 1024 * 1024))
+          nix shell --inputs-from . nixpkgs#android-tools -c unpack_bootimg \
+            --boot_img result-uboot-charger/boot.img --out "$RUNNER_TEMP/bootimg-unpacked" | tee bootimg-info.txt
+          grep -Fxq 'boot image header version: 2' bootimg-info.txt
+          grep -Fq 'kernel load address: 0x00008000' bootimg-info.txt
+          grep -Fq 'page size: 4096' bootimg-info.txt
+          grep -Fq 'root=PARTLABEL=userdata' bootimg-info.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          data = Path('result-uboot-charger/u-boot.bin').read_bytes()
+          for value in (b'bootcmd=run bootlinux\0', b'bootlinux=run bootnixos; run bootrescue\0',
+                        b'bootrescue=', b'sheng,charger-mode'):
+              if value not in data:
+                  raise SystemExit(f'Missing embedded U-Boot value: {value!r}')
+          PY
+
+      - name: Prepare candidate image and source metadata
+        run: |
+          set -euo pipefail
+          mkdir -p charger-artifact
+          cp result-uboot-charger/boot.img charger-artifact/sheng-personal-charger-test.img
+          cp bootimg-info.txt flake.lock charger-artifact/
+          git rev-parse HEAD > charger-artifact/revision.txt
+          printf '%s\n' \
+            'Experimental U-Boot charger candidate; not device validated.' \
+            'Normal U-Boot remains the default. This artifact contains no root filesystem.' \
+            > charger-artifact/BUILD-INFO.txt
+          (cd charger-artifact && sha256sum sheng-personal-charger-test.img bootimg-info.txt flake.lock revision.txt BUILD-INFO.txt > SHA256SUMS)
+
+      - name: Upload charger test boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-personal-charger-test
+          if-no-files-found: error
+          path: charger-artifact/
