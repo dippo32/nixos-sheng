@@ -6,6 +6,7 @@
     ./personal-performance.nix
     ./personal-generation-retention.nix
     ./personal-account.nix
+    ./personal-early-sensors.nix
     ./personal-removable-apps.nix
     ./personal-rotation.nix
   ];
