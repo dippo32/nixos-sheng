@@ -68,6 +68,8 @@ def main(path):
     add_unique(rpc, "before", ["iio-sensor-proxy.service"])
     add_unique(charger, "after", ["local-fs.target", "systemd-udev-trigger.service",
                                   "systemd-modules-load.service", "plymouth-start.service"])
+    add_unique(charger, "wants", ["local-fs.target", "systemd-udev-trigger.service",
+                                  "systemd-modules-load.service"])
     add_unique(charger, "before", ["basic.target", "display-manager.service", "shutdown.target"])
 
     if names["rpc"] not in charger["wants"]:
@@ -142,8 +144,12 @@ def main(path):
             if name == names["rpc"]:
                 lines += ["ConditionPathExists=|/dev/fastrpc-adsp",
                           "ConditionPathExists=|/dev/fastrpc-adsp-secure"]
+            if name == names["charger"]:
+                lines += ["ConditionKernelCommandLine=|androidboot.mode=charger",
+                          "ConditionPathExists=|/proc/device-tree/chosen/sheng,charger-mode"]
             if name.endswith(".service"):
-                lines += ["", "[Service]", "Type=oneshot", "ExecStart=/bin/true"]
+                service_type = "exec" if name == names["rpc"] else "oneshot"
+                lines += ["", "[Service]", f"Type={service_type}", "ExecStart=/bin/true"]
             elif name.endswith(".socket"):
                 lines += ["", "[Socket]", "ListenStream=/run/sheng-test-journald.sock",
                           "Service=sheng-test-journal.service"]
