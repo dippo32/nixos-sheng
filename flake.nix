@@ -240,6 +240,14 @@
               directBoot = true;
             };
 
+            # Explicit test artifact only; no system image selects it by default.
+            u-boot-personal-charger-test = pkgs.callPackage ./packages/u-boot {
+              src = u-boot-src;
+              version = u-boot-src.shortRev or "dirty";
+              directBoot = true;
+              chargerBoot = true;
+            };
+
             u-boot-dual = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;
               version = u-boot-src.shortRev or "dirty";

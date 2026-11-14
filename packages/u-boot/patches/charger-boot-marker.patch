@@ -1,0 +1,79 @@
+--- a/board/qualcomm/sheng/sheng.c
++++ b/board/qualcomm/sheng/sheng.c
+@@ -718,6 +718,10 @@
+ #define SHENG_PON_GEN3_KPDPWR	BIT(7)
+ #define SHENG_PON_POLL_MS		100
+ #define SHENG_PON_RELEASE_TIMEOUT_MS	10000
++#define SHENG_CHARGER_ESCAPE_MS	3000
++
++/* Set only for a confirmed cold start caused by charger insertion. */
++static bool sheng_charger_boot;
+ 
+ static struct udevice *sheng_pon_pmic(void)
+ {
+@@ -766,6 +770,7 @@
+ static void sheng_charger_boot_poweroff(void)
+ {
+ 	struct udevice *pmic = sheng_pon_pmic();
++	unsigned int waited_ms;
+ 	int reason;
+ 
+ 	if (!pmic)
+@@ -779,30 +784,19 @@
+ 	    !(reason & SHENG_PON_REASON_COLD))
+ 		return;
+ 
+-	/* DO NOT POWER OFF HERE. Tried it (b406) and it is an INFINITE
+-	 * REBOOT LOOP: the cable is still inserted, so the PMIC powers the
+-	 * SoC straight back up, we detect the charger again, power off
+-	 * again, forever. Powering down is simply not available while a
+-	 * charger is connected -- which is exactly why stock shows a
+-	 * charging screen instead of shutting down.
+-	 *
+-	 * So do what stock does: stay here. Linux is never booted, the panel
+-	 * shows this message, and pressing POWER boots normally. Idling in
+-	 * U-Boot is not a low-power charging mode, but it does the thing
+-	 * that actually matters -- plugging in a charger no longer drags the
+-	 * whole OS up.
+-	 */
++	/* Give POWER an escape window before handing charging to Linux. */
+ 	log_debug("sheng: charger-insert power-on (PON reason 0x%02x)\n", reason);
+-	printf("sheng: charging. Press POWER to boot.\n");
+-
+-	/* Unbounded on purpose: this is the charging idle. */
+-	for (;;) {
++	printf("sheng: charger boot; hold POWER for normal boot.\n");
++
++	for (waited_ms = 0; waited_ms < SHENG_CHARGER_ESCAPE_MS;
++	     waited_ms += SHENG_PON_POLL_MS) {
+ 		if (sheng_kpdpwr_pressed(pmic)) {
+ 			sheng_wait_kpdpwr_release(pmic);
+ 			return;
+ 		}
+ 		mdelay(SHENG_PON_POLL_MS);
+ 	}
++	sheng_charger_boot = true;
+ }
+ 
+ /* Relay the binary breadcrumb slots.
+@@ -912,12 +906,16 @@
+ {
+ 	int nodeoff;
+ 
++	/* This must not depend on the optional display diagnostics. */
++	nodeoff = fdt_path_offset(blob, "/chosen");
++	if (nodeoff < 0)
++		return 0;
++	if (sheng_charger_boot &&
++	    fdt_setprop(blob, nodeoff, "sheng,charger-mode", NULL, 0))
++		printf("sheng: charger marker failed; booting normally\n");
++
+ 	if (!IS_ENABLED(CONFIG_VIDEO_SHENG_MDSS) ||
+ 	    !IS_ENABLED(CONFIG_PRE_CONSOLE_BUFFER))
+-		return 0;
+-
+-	nodeoff = fdt_path_offset(blob, "/chosen");
+-	if (nodeoff < 0)
+ 		return 0;
+ 
+ 	sheng_relay_breadcrumbs(blob, nodeoff);
