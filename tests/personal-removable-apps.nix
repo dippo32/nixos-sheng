@@ -8,6 +8,7 @@ in
 assert !c.programs.firefox.enable;
 assert !(builtins.any (name: flake.inputs.nixpkgs.lib.hasPrefix "firefox" name) names);
 assert !(builtins.elem "librewolf" names);
+assert builtins.elem "librewolf-bin" names;
 assert !(builtins.elem "antigravity-ide" names);
 assert !(builtins.elem "chatgpt" names);
 assert nativeApps.chatgpt-native.pname == "chatgpt";
@@ -17,9 +18,10 @@ assert builtins.elem "aarch64-linux" nativeApps.antigravity-native.meta.platform
 assert !(builtins.hasAttr "x-scheme-handler/codex" c.xdg.mime.defaultApplications);
 assert !(builtins.hasAttr "x-scheme-handler/antigravity-ide" c.xdg.mime.defaultApplications);
 assert c.services.flatpak.enable && c.xdg.portal.enable;
-assert c.xdg.mime.defaultApplications."text/html" == "io.gitlab.librewolf-community.desktop";
+assert c.xdg.mime.defaultApplications."text/html" == "librewolf.desktop";
 assert
-  c.xdg.mime.defaultApplications."x-scheme-handler/https" == "io.gitlab.librewolf-community.desktop";
+  c.xdg.mime.defaultApplications."x-scheme-handler/https" == "librewolf.desktop";
+assert c.fileSystems."/".fsType == "ext4" && !c.sheng.rootfs.tmpfsRoot.enable;
 assert builtins.elem "display-manager.service" unit.before;
 assert unit.unitConfig.ConditionPathExists == "/var/lib/sheng-private/flatpak-seed.tar.zst";
 assert unit.serviceConfig.Type == "oneshot";
@@ -29,6 +31,7 @@ assert flake.nixosConfigurations.sheng-kde.config.sheng.rootfs.privateProvisioni
 assert flake.nixosConfigurations.sheng-kde.config.programs.firefox.enable;
 {
   firefoxRemoved = true;
+  nativeLibreWolf = true;
   mutableUserFlatpaks = true;
   nativeAppsAvailableForUserProfile = true;
   privateSeedRequired = true;

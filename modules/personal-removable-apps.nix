@@ -19,7 +19,7 @@ let
     ];
     text = builtins.readFile ../scripts/sheng-seed-flatpaks;
   };
-  browser = "io.gitlab.librewolf-community.desktop";
+  browser = "librewolf.desktop";
 in
 {
   assertions = [
@@ -35,6 +35,9 @@ in
   ];
 
   programs.firefox.enable = lib.mkForce false;
+  # Use the upstream ARM64 binary wrapped by Nix, rather than the optional
+  # Flatpak seed. No LibreWolf preferences or profile data are changed.
+  environment.systemPackages = [ pkgs.librewolf-bin ];
   xdg.mime.defaultApplications = {
     "text/html" = browser;
     "application/xhtml+xml" = browser;

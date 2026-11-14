@@ -41,9 +41,11 @@ Use the names displayed by `nix profile list` if they differ. Removing a
 profile entry does not automatically remove personal application settings or
 login data. A NixOS rebuild does not install these optional profile entries.
 
-The legacy private Flatpak seed remains optional. Without that seed, this
-profile does not provide its LibreWolf browser, and no replacement browser is
-installed by these outputs. The system no longer forces `codex:` or
+The legacy private Flatpak seed remains optional. Native LibreWolf is included
+in the personal system image separately from these optional user-profile apps.
+Its existing privacy defaults are unchanged; testing must establish whether
+desired site logins persist, and users can change site-specific settings in the
+browser. The system no longer forces `codex:` or
 `antigravity-ide:` links to the legacy Flatpak desktop IDs; verify link handling
 and desktop integration after installing the chosen native applications.
 Neither the native packages nor URI handling, updates, login persistence,

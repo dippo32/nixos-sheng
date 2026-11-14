@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -46,6 +46,7 @@ jobs:
               --expr "import ./tests/$check.nix { flake = builtins.getFlake (\"git+file://\" + toString ./.); }"
           done
           python3 tests/generation-retention.py
+          bash tests/kernel-closure-cache.sh
           nix build --impure --no-link --expr '(import ./tests/personal-rotation.nix { flake = builtins.getFlake ("git+file://" + toString ./.); system = "aarch64-linux"; }).scriptTests'
           nix shell --inputs-from . nixpkgs#android-tools nixpkgs#e2fsprogs nixpkgs#zstd \
             -c python3 tests/private-image-provision.py
@@ -58,11 +59,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          kernel=$(nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.outPath)
-          if nix path-info "$kernel" >/dev/null 2>&1; then
-            echo "The selected kernel is already in the store."
+          kernel_ref='.#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel'
+          outputs_json=$(nix eval --json "${kernel_ref}.outputs")
+          # This profile is modular and needs the image, build tree and modules.
+          printf '%s\n' "$outputs_json" | jq -e '
+            type == "array" and
+            all(.[]; type == "string" and test("^[a-zA-Z][a-zA-Z0-9_-]*$")) and
+            (index("out") != null and index("dev") != null and index("modules") != null) and
+            (length == (unique | length))' >/dev/null
+          printf '%s\n' "$outputs_json" | jq -r '.[]' > "$RUNNER_TEMP/kernel-output-names.txt"
+          : > "$RUNNER_TEMP/kernel-outputs.txt"
+          kernel_paths=()
+          kernel=''
+          while IFS= read -r output; do
+            path=$(nix eval --raw "${kernel_ref}.${output}.outPath")
+            printf '%s\t%s\n' "$output" "$path" >> "$RUNNER_TEMP/kernel-outputs.txt"
+            kernel_paths+=("$path")
+            if [ "$output" = out ]; then kernel="$path"; fi
+          done < "$RUNNER_TEMP/kernel-output-names.txt"
+          all_present=true
+          for path in "${kernel_paths[@]}"; do
+            if ! nix path-info "$path" >/dev/null 2>&1; then all_present=false; break; fi
+          done
+          if $all_present; then
+            echo "All selected kernel outputs are already in the store."
             exit 0
           fi
+          partial_imported=false
           repositories=("$GITHUB_REPOSITORY")
           if [ "$GITHUB_REPOSITORY" != Murkiness4095/nixos-sheng ]; then
             repositories+=(Murkiness4095/nixos-sheng)
@@ -71,28 +94,30 @@ jobs:
             if [ "$repository" = "$GITHUB_REPOSITORY" ]; then
               workflow=build-personal-kde.yml
               branches=("$GITHUB_REF_NAME")
-              if [ "$GITHUB_REF_NAME" != codex/kde-personal-flatpak-power ]; then
-                branches+=(codex/kde-personal-flatpak-power)
-              fi
-              # Prefer a successful personal build. Failed/cancelled image
-              # builds can still contain a finalized kernel from the earlier
-              # upload step. Path/checksum checks below remain mandatory.
-              statuses=(success failure cancelled)
+              for fallback in codex/upstream-kernel-audio codex/kde-personal-flatpak-power; do
+                if [ "$GITHUB_REF_NAME" != "$fallback" ]; then
+                  branches+=("$fallback")
+                fi
+              done
+              # v4+ artifacts become available once uploaded, even when an
+              # image build continues or subsequently fails. Search both
+              # push and manually dispatched runs, excluding the current run.
+              run_filter='.[] | select((.event == "push" or .event == "workflow_dispatch") and (.status == "in_progress" or (.status == "completed" and (.conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled")))) | .databaseId'
             else
               workflow=build.yml
               branches=(main)
-              statuses=(success)
+              run_filter='.[] | select(.event == "push" and .status == "completed" and .conclusion == "success") | .databaseId'
             fi
             for branch in "${branches[@]}"; do
-             for status in "${statuses[@]}"; do
-              if ! previous=$(gh run list --repo "$repository" --workflow "$workflow" --branch "$branch" --event push --status "$status" --limit 1 --json databaseId --jq '.[0].databaseId // empty'); then
-                echo "Kernel artifact discovery unavailable in $repository ($status)."
+             if ! previous_runs=$(gh run list --repo "$repository" --workflow "$workflow" --branch "$branch" --limit 20 --json databaseId,event,status,conclusion --jq "$run_filter"); then
+               echo "Kernel artifact discovery unavailable in $repository ($branch)."
+               continue
+             fi
+             for previous in $previous_runs; do
+              if [ "$repository" = "$GITHUB_REPOSITORY" ] && [ "$previous" = "$GITHUB_RUN_ID" ]; then
                 continue
               fi
-              if [ -z "$previous" ]; then
-                continue
-              fi
-              if ! artifact=$(gh api "repos/$repository/actions/runs/$previous/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "sheng-kernel-closure" and .expired == false) | .id'); then
+              if ! artifact=$(gh api "repos/$repository/actions/runs/$previous/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "sheng-kernel-closure" and .expired == false and .size_in_bytes > 0) | .id'); then
                 echo "Cannot inspect kernel artifacts in $repository run $previous."
                 continue
               fi
@@ -109,11 +134,42 @@ jobs:
                 echo "Kernel closure in $repository run $previous does not match this configuration."
                 continue
               fi
-              (cd "$seed" && sha256sum -c SHA256SUMS)
-              zstd -dc "$seed/sheng-kernel-closure.nar.zst" | sudo "$(command -v nix-store)" --import | tee "$seed/imported-paths.txt" >/dev/null
-              nix path-info "$kernel" >/dev/null
-              echo "Restored matching kernel closure from $repository run $previous."
-              exit 0
+              if [ ! -f "$seed/SHA256SUMS" ] || ! grep -Eq '^[0-9a-f]{64}  sheng-kernel-closure\.nar\.zst$' "$seed/SHA256SUMS"; then
+                echo "Kernel closure checksum is missing in $repository run $previous."
+                continue
+              fi
+              if ! (cd "$seed" && sha256sum -c --strict SHA256SUMS); then
+                echo "Kernel closure checksum failed in $repository run $previous."
+                continue
+              fi
+              full_manifest=false
+              if [ -f "$seed/kernel-outputs.txt" ]; then
+                if ! grep -Eq '^[0-9a-f]{64}  kernel-outputs\.txt$' "$seed/SHA256SUMS" || ! cmp -s "$RUNNER_TEMP/kernel-outputs.txt" "$seed/kernel-outputs.txt"; then
+                  echo "Kernel output manifest does not match in $repository run $previous."
+                  continue
+                fi
+                full_manifest=true
+              elif $partial_imported; then
+                continue
+              fi
+              if ! zstd -dc "$seed/sheng-kernel-closure.nar.zst" | sudo "$(command -v nix-store)" --import | tee "$seed/imported-paths.txt" >/dev/null; then
+                echo "Kernel closure import failed in $repository run $previous."
+                continue
+              fi
+              if ! nix path-info "$kernel" >/dev/null 2>&1; then
+                echo "Imported closure is missing the selected kernel image in $repository run $previous."
+                continue
+              fi
+              all_present=true
+              for path in "${kernel_paths[@]}"; do
+                if ! nix path-info "$path" >/dev/null 2>&1; then all_present=false; break; fi
+              done
+              if $full_manifest && $all_present; then
+                echo "Restored all matching kernel outputs from $repository run $previous."
+                exit 0
+              fi
+              partial_imported=true
+              echo "Imported a partial legacy or incomplete closure from $repository run $previous; continuing to look for all outputs."
              done
             done
           done
@@ -122,18 +178,27 @@ jobs:
       - name: Build and export selected kernel closure
         run: |
           set -euo pipefail
-          nix build -L .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel -o result-kernel
+          kernel_ref='.#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel'
+          nix build -L "${kernel_ref}^*" -o result-kernel
           mkdir -p kernel-artifacts
-          nix path-info -r ./result-kernel > kernel-artifacts/store-paths.txt
+          cp "$RUNNER_TEMP/kernel-outputs.txt" kernel-artifacts/kernel-outputs.txt
+          kernel_paths=()
+          while IFS=$'\t' read -r output path; do
+            link="result-kernel-$output"
+            if [ "$output" = out ]; then link=result-kernel; fi
+            test "$(readlink -f "$link")" = "$path"
+            kernel_paths+=("$path")
+            if [ "$output" = out ]; then printf '%s\n' "$path" > kernel-artifacts/kernel-path.txt; fi
+          done < kernel-artifacts/kernel-outputs.txt
+          nix-store --query --requisites "${kernel_paths[@]}" > kernel-artifacts/store-paths.txt
           mapfile -t store_paths < kernel-artifacts/store-paths.txt
           nix-store --export "${store_paths[@]}" | zstd -T0 -3 -o kernel-artifacts/sheng-kernel-closure.nar.zst
-          nix eval --raw .#nixosConfigurations.sheng-kde-personal.config.boot.kernelPackages.kernel.outPath > kernel-artifacts/kernel-path.txt
           git rev-parse HEAD > kernel-artifacts/revision.txt
           cp flake.lock kernel-artifacts/flake.lock
-          (cd kernel-artifacts && sha256sum sheng-kernel-closure.nar.zst > SHA256SUMS)
+          (cd kernel-artifacts && sha256sum sheng-kernel-closure.nar.zst kernel-outputs.txt kernel-path.txt > SHA256SUMS)
 
       - name: Upload kernel closure before building the image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sheng-kernel-closure
           if-no-files-found: error
@@ -204,7 +269,8 @@ jobs:
             'Bring-up USB serial gadget disabled at boot; actual Type-C roles require device testing.' \
             'Direct-boot U-Boot; older system generation links are pruned after matching booted/current/profile checks.' \
             'Account: dippo / Dippo Shelan. Login is locked until private local credential provisioning.' \
-            'Firefox omitted; mutable user Flatpaks are injected privately after this public build.' \
+            'Native LibreWolf is included; its privacy defaults are unchanged.' \
+            'ChatGPT and Antigravity native packages are optional user-profile installs.' \
             'THIS IS AN UNPROVISIONED BASE. Do not flash before private credential/app assembly.' \
             'Charging settings remain unchanged from the installed candidate.' \
             'A successful build does not verify device suspend/resume or battery life.' \
@@ -215,7 +281,7 @@ jobs:
             > SHA256SUMS)
 
       - name: Upload personal KDE single-system image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sheng-kde-personal-flashable
           if-no-files-found: error

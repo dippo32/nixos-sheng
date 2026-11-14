@@ -14,6 +14,7 @@ assert personal.version == diagnostic.version;
 assert personal.modDirVersion == diagnostic.modDirVersion;
 assert personal.version == "7.3.4-sheng";
 assert personal.modDirVersion == "7.3.4-sm8550";
+assert personal.config.isYes "MODULES";
 assert personal.config.isYes "PM_DEBUG";
 assert personal.config.isYes "PM_SLEEP_DEBUG";
 {

@@ -17,8 +17,10 @@ GNOME and dual-boot profiles keep their defaults; personal changes are separate.
   Plasma's Virtual Keyboard settings after login. Plasma Keyboard remains the
   default and supplies the separate login screen. Maliit build and device
   behavior, including lock-screen input and recovery, still need verification.
-- Firefox is omitted. LibreWolf is the configured HTTP/HTTPS/HTML application,
-  but is available only when the optional legacy private seed is provided.
+- Firefox is omitted. Native LibreWolf is included as the default
+  HTTP/HTTPS/HTML browser, using the upstream ARM64 binary via Nixpkgs. It does
+  not require Flatpak or the legacy private seed. LibreWolf privacy defaults
+  remain unchanged; session persistence needs a real-device check.
 - The preferred ChatGPT and Antigravity IDE packages are native, optional user
   profile installations, not part of the system image. See [native applications](native-apps.md).
   They have not been built or tested on the tablet.
