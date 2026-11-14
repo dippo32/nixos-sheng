@@ -12,7 +12,9 @@ The pinned ChatGPT package uses an official ARM64 OpenAI release, and the
 Antigravity App is pinned to Google's ARM64 release 2.32.0 (build
 6141816156848128), using the pinned Nixpkgs `antigravity-hub` wrapper.
 Its official tarball was fetched and SHA-256 pinned; ARM64 build success
-and correct runtime behaviour on this device have not yet been verified.
+was verified in [run 43569038143](https://github.com/dippo32/nixos-sheng/actions/runs/43569038143)
+along with the ChatGPT Desktop package. Neither GUI's runtime behaviour on this
+device has yet been verified.
 NixOS is not in OpenAI's list of officially supported Linux distributions for
 the ChatGPT preview; consult the vendor's Linux documentation for current
 platform and feature limitations.
@@ -51,5 +53,5 @@ desired site logins persist, and users can change site-specific settings in the
 browser. The system no longer forces `codex:` or
 `antigravity-ide:` links to the legacy Flatpak desktop IDs; verify link handling
 and desktop integration after installing the chosen native applications.
-Neither the native packages nor URI handling, updates, login persistence,
+Neither GUI's launch, sign-in, URI handling, updates, login persistence,
 extensions, or device access have been tested on the tablet.

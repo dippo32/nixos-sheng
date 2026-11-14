@@ -21,12 +21,26 @@ is retained until a device test verifies the replacement.
   passed [run 43569205450](https://github.com/dippo32/nixos-sheng/actions/runs/43569205450).
   The normal boot derivation remained equal to the baseline; the candidate
   boot image has not yet been tested on the tablet.
-- The kernel cache now exports and validates all kernel outputs. Earlier logs
-  showed that exporting only `out` left `dev` and `modules` unavailable and
-  caused the image job to rebuild the kernel. Simulation checks are included in
-  the personal workflow; a complete fresh-run cache restore still needs evidence.
-- Record the final image run, revision, store paths and hashes here after it
-  finishes. Builds do not establish hardware functionality.
+- The final image build passed in
+  [run 43570628913](https://github.com/dippo32/nixos-sheng/actions/runs/43570628913)
+  from source commit `8a1a79c`. Its ARM64 job took 19 minutes 17 seconds.
+  The flashable artifact ID is `14105051020`; its GitHub artifact ZIP digest is
+  `sha256:ac2b6582fd93d0f4196a8ac636d6dc263a9fa1ccbe614061ec8a0833b2f91a32`.
+  This digest identifies the downloaded ZIP, not the image file inside it.
+- That run verified the kernel closure, output manifest and kernel-path
+  checksums, then restored all matching outputs from
+  [run 43568366425](https://github.com/dippo32/nixos-sheng/actions/runs/43568366425).
+  The subsequent kernel build and export step completed in three seconds.
+  The final run also compiled the FastRPC 64-bit log-format fix on ARM64.
+- The static filesystem tools passed
+  [run 43571313139](https://github.com/dippo32/nixos-sheng/actions/runs/43571313139).
+  The built e2fsprogs version is 1.47.4; the version and SHA-256 of the copy
+  checked in TWRP matched the built tool. This confirms the tool copy, not a
+  completed filesystem restore or resize.
+
+Builds and tool checks do not establish hardware functionality. The fingerprint
+driver tests were skipped due to missing introspection dependencies; the
+assembling test also lacked dependencies. Runtime validation is still required.
 
 ## Charger experiment
 
