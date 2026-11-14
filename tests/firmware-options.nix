@@ -38,6 +38,8 @@ let
     assert hasPackage "sheng-fingerprint" packages;
     assert hasPackage "sheng-mipps-auth" packages;
     assert hasPackage "sheng-charger-mode" packages;
+    assert hasPackage "sheng-charger-mode" systemdPackages;
+    assert c.systemd.services.xiaomi-charger-mode.wantedBy == [ "multi-user.target" ];
     assert hasPackage "alsa-ucm-sheng" packages;
     assert c.services.fprintd.enable;
     assert c.hardware.bluetooth.enable;

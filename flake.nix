@@ -224,6 +224,11 @@
             nixos-dual-kde = shengDualKde.config.system.build.shengImage;
             nixos-dual-gnome = shengDualGnome.config.system.build.shengImage;
 
+            # Optional native applications for a user's Nix profile, not the
+            # system image. The project's pinned pkgs permits these unfree apps.
+            chatgpt-native = pkgs.chatgpt;
+            antigravity-native = pkgs.antigravity-ide;
+
             u-boot = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;
               version = u-boot-src.shortRev or "dirty";

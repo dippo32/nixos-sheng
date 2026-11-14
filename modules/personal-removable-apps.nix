@@ -1,4 +1,5 @@
-# Apps are a private, mutable per-user Flatpak seed, not Nix store packages.
+# The legacy private Flatpak seed remains optional; the native apps can be
+# installed separately into a user's Nix profile.
 {
   config,
   lib,
@@ -39,8 +40,6 @@ in
     "application/xhtml+xml" = browser;
     "x-scheme-handler/http" = browser;
     "x-scheme-handler/https" = browser;
-    "x-scheme-handler/codex" = "io.github.dippo32.ChatGPT.desktop";
-    "x-scheme-handler/antigravity-ide" = "io.github.dippo32.AntigravityIDE.desktop";
   };
 
   # The image assembler inserts the seed privately, outside the Nix store.

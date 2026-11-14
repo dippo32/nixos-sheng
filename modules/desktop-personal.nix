@@ -50,6 +50,9 @@
   services.logind.settings.Login.HandlePowerKey = "suspend";
 
   environment.systemPackages = [
+    # Optional desktop input method; Plasma Keyboard remains the default and
+    # continues to provide the separate SDDM login keyboard.
+    pkgs.maliit-keyboard
     pkgs.trace-cmd
     (pkgs.writeShellApplication {
       name = "sheng-power-report";

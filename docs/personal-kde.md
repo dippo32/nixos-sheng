@@ -13,14 +13,19 @@ GNOME and dual-boot profiles keep their defaults; personal changes are separate.
   the Nix store or public Actions artifacts. `users.mutableUsers=false` makes
   that private file authoritative at activation; change it to change the PIN.
 - Plasma Keyboard is selected for SDDM and the user's Wayland session.
-- Firefox is omitted. LibreWolf is the default HTTP/HTTPS/HTML application.
-- LibreWolf, ChatGPT and Antigravity IDE are mutable per-user Flatpaks. The
-  private seed is prepared from signed Flathub ARM64 refs and official ARM64
-  vendor packages; the latter two use local, non-vendor Flatpak wrappers.
-  See [removable applications](removable-apps.md) for provenance and limits.
-- A first-boot service extracts the private seed as `dippo`, validates the refs,
-  and deletes the seed only after success. User uninstallation is not undone by
-  reboot or rebuild. Application payloads are not roots in the system Nix closure.
+- Maliit Keyboard is available as an optional desktop alternative; select it in
+  Plasma's Virtual Keyboard settings after login. Plasma Keyboard remains the
+  default and supplies the separate login screen. Maliit build and device
+  behavior, including lock-screen input and recovery, still need verification.
+- Firefox is omitted. LibreWolf is the configured HTTP/HTTPS/HTML application,
+  but is available only when the optional legacy private seed is provided.
+- The preferred ChatGPT and Antigravity IDE packages are native, optional user
+  profile installations, not part of the system image. See [native applications](native-apps.md).
+  They have not been built or tested on the tablet.
+- The legacy seed contains per-user Flatpaks for LibreWolf, ChatGPT and
+  Antigravity IDE; the latter two are non-vendor wrappers. If the seed is
+  supplied, a first-boot service extracts it as `dippo`, validates the refs,
+  and deletes it only after success. See [removable applications](removable-apps.md).
 
 ## Boot, rotation and responsiveness
 
@@ -94,12 +99,17 @@ application seed. A personal-only 8 GiB reserve preserves the initial mkfs-creat
 filesystem size, skips the locked builder's shrink/grow commands, and checks
 actual free space. No fixed-size resize is used.
 
-Prepare a private seed with `scripts/prepare-personal-flatpaks.py`, then use
-`scripts/provision-private-image.py` with the base image, a 0600 hash file and
-0600 seed in a 0700 directory. It injects files with debugfs, verifies readback,
-owner/mode and free space, runs bounded filesystem checks, and creates a new
-checksummed sparse image. It never mounts, flashes or resizes the filesystem.
-Keep the resulting image and provenance local/private.
+For the legacy Flatpak route, prepare a private seed with
+`scripts/prepare-personal-flatpaks.py`, then use `scripts/provision-private-image.py`
+with the base image, a 0600 hash file and a 0600 seed in a 0700 directory.
+That script currently requires both files. It injects them with debugfs,
+verifies readback, owner/mode and free space, runs bounded filesystem checks,
+and creates a new checksummed sparse image. It never mounts, flashes or resizes
+the filesystem. Keep the resulting image and provenance local/private.
+
+The native route does not need the Flatpak seed, but the account still needs a
+private hash file before first activation. An account-only provisioning route
+must be validated separately; the existing image assembler cannot omit the seed.
 
 Before flashing, verify model/unlock/current slot, exact target partition and
 expanded sparse size, hashes and physical fastboot recovery. Installation erases

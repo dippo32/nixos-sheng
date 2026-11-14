@@ -50,8 +50,8 @@ jobs:
           nix shell --inputs-from . nixpkgs#android-tools nixpkgs#e2fsprogs nixpkgs#zstd \
             -c python3 tests/private-image-provision.py
 
-      - name: Build and test charger helper before the kernel
-        run: nix build -L --no-link .#sheng-mipps-auth
+      - name: Build and test charger helpers before the kernel
+        run: nix build -L --no-link .#sheng-mipps-auth .#sheng-charger-mode
 
       - name: Restore matching kernel closure from this fork or upstream
         env:

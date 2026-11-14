@@ -36,6 +36,7 @@ assert builtins.elem "flatpak" packages;
 assert builtins.elem "discover" packages;
 assert builtins.elem "plasma-keyboard" packages;
 assert builtins.elem "qtvirtualkeyboard" packages;
+assert builtins.elem "maliit-keyboard" packages;
 assert builtins.elem "xdg-desktop-portal-kde" (
   builtins.map (p: p.pname or p.name) c.xdg.portal.extraPortals
 );

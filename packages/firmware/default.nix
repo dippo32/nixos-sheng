@@ -4,9 +4,10 @@
 
 let
   libssc = callPackage ./libssc { };
+  sheng-mipps-auth = callPackage ./sheng-mipps-auth { };
 in
 {
-  inherit libssc;
+  inherit libssc sheng-mipps-auth;
 
   sheng-firmware-blobs = callPackage ./sheng-firmware-blobs { };
   fastrpc = callPackage ./fastrpc { };
@@ -18,6 +19,5 @@ in
   sheng-thp = callPackage ./sheng-thp { inherit libssc; };
   sheng-pen-status = callPackage ./sheng-pen-status { };
   sheng-keyboard-helper = callPackage ./sheng-keyboard-helper { inherit libssc; };
-  sheng-mipps-auth = callPackage ./sheng-mipps-auth { };
-  sheng-charger-mode = callPackage ./sheng-charger-mode { };
+  sheng-charger-mode = callPackage ./sheng-charger-mode { inherit sheng-mipps-auth; };
 }
