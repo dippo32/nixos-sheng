@@ -33,7 +33,7 @@ stdenv.mkDerivation {
     hash = "sha256-dWSjyFBfvmuWelNT0aAmV5JTj/p8Z5+tGu7csVu62Yo=";
   };
 
-  patches = [ ./privacy-defaults.patch ./hunspell-path.patch ];
+  patches = [ ./privacy-defaults.patch ./hunspell-path.patch ./landscape-split.patch ];
 
   postPatch = ''
     substituteInPlace src/typing/localeresolver.cpp \
