@@ -1,5 +1,4 @@
-# Framebuffer charger-mode screen, shown when the cmdline carries
-# androidboot.mode=charger. The upstream program is a Python script.
+# Framebuffer charger-mode screen; activated by a charger boot marker.
 {
   lib,
   stdenvNoCC,
@@ -7,6 +6,7 @@
   python3,
   util-linux,
   plymouth,
+  systemd,
   sheng-mipps-auth,
 }:
 
@@ -20,6 +20,15 @@ stdenvNoCC.mkDerivation {
     rev = "0c00fcd2cb064f563f44babb345c1dffecf2ada2"; # master as of 2026-08-18
     hash = "sha256-g0IfrZzQ98Uwd2kXEZeYt9Zwf0dzTw12nyoDMgL69WQ=";
   };
+
+  patches = [ ./charger-safety.patch ];
+  nativeCheckInputs = [ python3 ];
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    python3 ${./tests/test_charger.py} ./xiaomi-charger-mode
+    runHook postCheck
+  '';
 
   dontBuild = true;
   dontConfigure = true;
@@ -37,7 +46,8 @@ stdenvNoCC.mkDerivation {
       --replace-fail '#!/usr/bin/python3' '#!${python3}/bin/python3' \
       --replace-fail '/usr/libexec/xiaomi-mipps-auth' '${sheng-mipps-auth}/libexec/xiaomi-mipps-auth' \
       --replace-fail '/usr/bin/flock' '${util-linux}/bin/flock' \
-      --replace-fail '/usr/bin/plymouth' '${plymouth}/bin/plymouth'
+      --replace-fail '/usr/bin/plymouth' '${plymouth}/bin/plymouth' \
+      --replace-fail '/usr/bin/systemctl' '${systemd}/bin/systemctl'
     substituteInPlace "$out/lib/systemd/system/xiaomi-charger-mode.service" \
       --replace-fail '/usr/libexec/xiaomi-charger-mode' "$out/libexec/xiaomi-charger-mode"
 
@@ -48,12 +58,14 @@ stdenvNoCC.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
     grep -Fx "ExecStart=$out/libexec/xiaomi-charger-mode" "$out/lib/systemd/system/xiaomi-charger-mode.service"
-    grep -Fx 'ConditionKernelCommandLine=androidboot.mode=charger' "$out/lib/systemd/system/xiaomi-charger-mode.service"
+    grep -Fx 'ConditionKernelCommandLine=|androidboot.mode=charger' "$out/lib/systemd/system/xiaomi-charger-mode.service"
+    grep -Fx 'ConditionPathExists=|/proc/device-tree/chosen/sheng,charger-mode' "$out/lib/systemd/system/xiaomi-charger-mode.service"
     grep -Fx 'Before=basic.target display-manager.service shutdown.target' "$out/lib/systemd/system/xiaomi-charger-mode.service"
     grep -Fx '#!${python3}/bin/python3' "$out/libexec/xiaomi-charger-mode"
     grep -F '${sheng-mipps-auth}/libexec/xiaomi-mipps-auth' "$out/libexec/xiaomi-charger-mode"
     grep -F '${util-linux}/bin/flock' "$out/libexec/xiaomi-charger-mode"
     grep -F '${plymouth}/bin/plymouth' "$out/libexec/xiaomi-charger-mode"
+    grep -F '${systemd}/bin/systemctl' "$out/libexec/xiaomi-charger-mode"
     ${python3}/bin/python3 -c 'import pathlib, sys; p = pathlib.Path(sys.argv[1]); compile(p.read_bytes(), str(p), "exec")' "$out/libexec/xiaomi-charger-mode"
     runHook postInstallCheck
   '';

@@ -1,0 +1,100 @@
+--- a/xiaomi-charger-mode
++++ b/xiaomi-charger-mode
+@@ -4 +3,0 @@
+-import ctypes
+@@ -23,0 +23,2 @@
++KEY_RESCAN_SECS = 1.0
++KEY_DISCOVERY_TIMEOUT_SECS = 30.0
+@@ -25,7 +25,0 @@
+-
+-SYS_REBOOT = 142
+-LINUX_REBOOT_MAGIC1 = 0xfee1dead
+-LINUX_REBOOT_MAGIC2 = 672274793
+-LINUX_REBOOT_CMD_RESTART = 0x01234567
+-LINUX_REBOOT_CMD_POWER_OFF = 0x4321fedc
+-
+@@ -61 +55,2 @@
+-    return "androidboot.mode=charger" in read_text("/proc/cmdline").split()
++    return ("androidboot.mode=charger" in read_text("/proc/cmdline").split()
++            or os.path.exists("/proc/device-tree/chosen/sheng,charger-mode"))
+@@ -414,10 +409,3 @@
+-def reboot_syscall(command):
+-    libc = ctypes.CDLL(None, use_errno=True)
+-    rc = libc.syscall(SYS_REBOOT, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+-                      command, None)
+-    if rc != 0:
+-        errno = ctypes.get_errno()
+-        raise OSError(errno, os.strerror(errno))
+-
+-
+-def request_power_action(reason, command, message):
++def request_poweroff(reason):
++    # Ask systemd to shut down and unmount filesystems cleanly. If the
++    # request fails, returning lets normal boot continue instead of hanging.
+@@ -425,10 +413,17 @@
+-    draw_screen(message)
+-    reboot_syscall(command)
+-
+-
+-def request_reboot(reason):
+-    request_power_action(reason, LINUX_REBOOT_CMD_RESTART, "REBOOTING")
+-
+-
+-def request_poweroff(reason):
+-    request_power_action(reason, LINUX_REBOOT_CMD_POWER_OFF, "POWERING OFF")
++    draw_screen("POWERING OFF")
++    try:
++        subprocess.run(["/usr/bin/systemctl", "--no-block", "poweroff"],
++                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
++                       stderr=subprocess.DEVNULL, timeout=10, check=True)
++        return True
++    except (OSError, subprocess.SubprocessError):
++        log("poweroff request failed; continuing normal boot")
++        return False
++
++
++def finish_normal_boot(backlight, backlight_on_value, display_on):
++    # A short power-key press can blank the panel. Restore it before leaving
++    # charger mode, otherwise the desktop may start with its panel dark.
++    if not display_on and backlight:
++        set_backlight(backlight, backlight_on_value)
++    return 0
+@@ -466,0 +462 @@
++    next_key_rescan = start + KEY_RESCAN_SECS
+@@ -481,0 +478,7 @@
++        # udev may create the input device after the service has started.
++        if not fds and now >= next_key_rescan:
++            fds = open_power_key_events()
++            next_key_rescan = now + KEY_RESCAN_SECS
++        if not fds and now - start >= KEY_DISCOVERY_TIMEOUT_SECS:
++            log("power key unavailable; continuing normal boot")
++            return finish_normal_boot(backlight, backlight_on_value, display_on)
+@@ -513,2 +516,4 @@
+-            request_reboot("power key held, rebooting")
+-            return 0
++            # Returning from this oneshot lets systemd continue normal boot;
++            # it avoids resetting into an uncertain charger PON reason.
++            log("power key held, continuing normal boot")
++            return finish_normal_boot(backlight, backlight_on_value, display_on)
+@@ -533,2 +538,3 @@
+-                request_poweroff("external power removed, powering off")
+-                return 0
++                if request_poweroff("external power removed, powering off"):
++                    return 0
++                return finish_normal_boot(backlight, backlight_on_value, display_on)
+@@ -536,2 +542,2 @@
+-            request_poweroff("external power not detected, powering off")
+-            return 0
++            log("external power not detected; continuing normal boot")
++            return finish_normal_boot(backlight, backlight_on_value, display_on)
+@@ -539,2 +545,2 @@
+-            request_poweroff("external power not detected, powering off")
+-            return 0
++            log("external power not detected; continuing normal boot")
++            return finish_normal_boot(backlight, backlight_on_value, display_on)
+--- a/xiaomi-charger-mode.service
++++ b/xiaomi-charger-mode.service
+@@ -4 +4,2 @@
+-ConditionKernelCommandLine=androidboot.mode=charger
++ConditionKernelCommandLine=|androidboot.mode=charger
++ConditionPathExists=|/proc/device-tree/chosen/sheng,charger-mode
