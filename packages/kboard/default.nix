@@ -7,6 +7,7 @@
   ninja,
   pkg-config,
   dbus,
+  writableTmpDirAsHomeHook,
   kdePackages,
   qt6,
   wayland,
@@ -40,6 +41,7 @@ stdenv.mkDerivation {
   '';
 
   nativeBuildInputs = [ cmake ninja pkg-config dbus kdePackages.extra-cmake-modules qt6.wrapQtAppsHook ];
+  nativeCheckInputs = [ writableTmpDirAsHomeHook ];
   buildInputs = [
     qt6.qtbase qt6.qtdeclarative qt6.qtwayland qt6.qtmultimedia qt6.qttools
     kdePackages.kconfig kdePackages.kcoreaddons kdePackages.ki18n
