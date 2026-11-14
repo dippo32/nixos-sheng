@@ -23,16 +23,17 @@ jobs:
       - name: Build static e2fsprogs from pinned nixpkgs
         run: |
           set -euo pipefail
-          nix build -L --impure --expr \
-            '(builtins.getFlake (toString ./.)).inputs.nixpkgs.legacyPackages.aarch64-linux.pkgsStatic.e2fsprogs' \
-            -o result-e2fs
+          output=$(nix build -L --impure --no-link --print-out-paths --expr \
+            '(builtins.getFlake (toString ./.)).inputs.nixpkgs.legacyPackages.aarch64-linux.pkgsStatic.e2fsprogs.bin')
+          test -d "$output/bin"
+          printf 'E2FS_OUTPUT=%s\n' "$output" >> "$GITHUB_ENV"
 
       - name: Check ELF architecture, linking and executable versions
         run: |
           set -euo pipefail
           mkdir -p recovery-tools
           for tool in e2fsck resize2fs debugfs tune2fs dumpe2fs; do
-            path=$(find -L result-e2fs -type f -name "$tool" -print -quit)
+            path=$(find -L "$E2FS_OUTPUT" -type f -name "$tool" -print -quit)
             test -n "$path"
             cp -L "$path" "recovery-tools/$tool"
             chmod 755 "recovery-tools/$tool"
