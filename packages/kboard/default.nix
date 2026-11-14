@@ -6,6 +6,7 @@
   cmake,
   ninja,
   pkg-config,
+  dbus,
   kdePackages,
   qt6,
   wayland,
@@ -30,7 +31,9 @@ stdenv.mkDerivation {
     hash = "sha256-dWSjyFBfvmuWelNT0aAmV5JTj/p8Z5+tGu7csVu62Yo=";
   };
 
-  nativeBuildInputs = [ cmake ninja pkg-config kdePackages.extra-cmake-modules qt6.wrapQtAppsHook ];
+  patches = [ ./privacy-defaults.patch ];
+
+  nativeBuildInputs = [ cmake ninja pkg-config dbus kdePackages.extra-cmake-modules qt6.wrapQtAppsHook ];
   buildInputs = [
     qt6.qtbase qt6.qtdeclarative qt6.qtwayland qt6.qtmultimedia qt6.qttools
     kdePackages.kconfig kdePackages.kcoreaddons kdePackages.ki18n
@@ -51,7 +54,15 @@ stdenv.mkDerivation {
   doCheck = true;
   checkPhase = ''
     runHook preCheck
-    QT_QPA_PLATFORM=offscreen ctest --no-tests=error --output-on-failure -R '^testkeylayout$'
+    export QT_QPA_PLATFORM=offscreen
+    for test_name in testkeylayout clipboardhistorytest kboard-typing-predictiontest; do
+      ctest --show-only | grep -Eq "Test +#[0-9]+: +$test_name$"
+    done
+    dbus-run-session -- ctest --no-tests=error --verbose -R '^(testkeylayout|clipboardhistorytest|kboard-typing-predictiontest)$' | tee "$TMPDIR/kboard-check.log"
+    if grep -Eq 'SKIP.*(private D-Bus session|isolated session)' "$TMPDIR/kboard-check.log"; then
+      echo 'Clipboard D-Bus isolation test was skipped' >&2
+      exit 1
+    fi
     runHook postCheck
   '';
   postInstall = ''
