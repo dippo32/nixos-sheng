@@ -1,0 +1,50 @@
+--- a/src/apps_std_imp.c
++++ b/src/apps_std_imp.c
+@@ -154,7 +154,7 @@
+   } else {
+     nErr = ESTALE;
+     VERIFY_EPRINTF(
+-        "Error 0x%x: %s: stale directory handle 0x%llx passed by DSP\n", nErr,
++        "Error 0x%x: %s: stale directory handle 0x%" PRIx64 " passed by DSP\n", nErr,
+         __func__, dir->handle);
+     goto bail;
+   }
+--- a/src/apps_mem_imp.c
++++ b/src/apps_mem_imp.c
+@@ -17,6 +17,7 @@
+ #include "remote64.h"
+ #include "rpcmem_internal.h"
+ #include "verify.h"
++#include <inttypes.h>
+ #include <pthread.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -204,7 +205,7 @@
+       minfo = NULL;
+     }
+     VERIFY_EPRINTF("Error 0x%x: apps_mem_request_mmap64 failed for fd 0x%x of "
+-                   "size %lld (lflags 0x%x, rflags 0x%x)\n",
++                   "size %" PRId64 " (lflags 0x%x, rflags 0x%x)\n",
+                    nErr, fd, len, lflags, rflags);
+   }
+   FASTRPC_ATRACE_END();
+@@ -283,8 +284,8 @@
+   mfree = NULL;
+ bail:
+   if (nErr != AEE_SUCCESS) {
+-    VERIFY_EPRINTF("Error 0x%x: apps_mem_request_unmap64 failed for size %lld "
+-                   "(vadsp 0x%llx)\n",
++    VERIFY_EPRINTF("Error 0x%x: apps_mem_request_unmap64 failed for size %" PRId64 " "
++                   "(vadsp 0x%" PRIx64 ")\n",
+                    nErr, len, vadsp);
+   }
+   FASTRPC_ATRACE_END();
+@@ -353,7 +354,7 @@
+   nErr = apps_mem_request_unmap64(vadsp, len1);
+   if (nErr != AEE_SUCCESS) {
+     VERIFY_EPRINTF(
+-        "Error 0x%x: apps_mem_share_unmap failed size %d (vadsp 0x%llx)\n",
++        "Error 0x%x: apps_mem_share_unmap failed size %d (vadsp 0x%" PRIx64 ")\n",
+         nErr, size, vadsp);
+   }
+   return nErr;

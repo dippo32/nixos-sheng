@@ -21,6 +21,9 @@ stdenv.mkDerivation rec {
     hash = "sha256-/RXH34zqAxtWty75UHoOvS6fdmB+UfTRtB6G9IZiSWk=";
   };
 
+  # Fix printf type mismatches on AArch64 in DSP error messages.
+  patches = [ ./fix-format-64-bit.patch ];
+
   nativeBuildInputs = [
     autoreconfHook
     pkg-config
