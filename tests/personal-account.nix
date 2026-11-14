@@ -14,6 +14,9 @@ let
     base.sheng.desktop.userName == publicUser
     && base.services.displayManager.autoLogin.enable
     && base.services.displayManager.autoLogin.user == publicUser
+    && (!base.services.displayManager.sddm.enable
+      || builtins.match ".*--inputmethod .*/bin/plasma-keyboard.*"
+        base.services.displayManager.sddm.settings.Wayland.CompositorCommand != null)
     && base.users.users.${publicUser}.description == "NixOS desktop user"
     && base.users.users.${publicUser}.initialPassword != null
     && base.users.users.${publicUser}.hashedPasswordFile == null
@@ -45,10 +48,10 @@ assert c.services.displayManager.sddm.enable;
 assert c.services.displayManager.sddm.wayland.enable;
 assert c.services.displayManager.sddm.wayland.compositor == "kwin";
 assert
-  builtins.match ".*--inputmethod .*/bin/plasma-keyboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
+  builtins.match ".*--inputmethod .*/bin/kboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
   != null;
 assert
-  builtins.match ".*InputMethod=.*/share/applications/org.kde.plasma.keyboard.desktop.*"
+  builtins.match ".*InputMethod=.*/share/applications/org.devl0rd.kboard.desktop.*"
     c.environment.etc."xdg/kwinrc".text != null;
 assert builtins.all standardAccountUnchanged [
   "sheng-kde"

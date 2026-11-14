@@ -13,7 +13,7 @@ assert c.services.displayManager.sddm.enable;
 assert c.services.displayManager.sddm.wayland.enable;
 assert c.services.displayManager.sddm.wayland.compositor == "kwin";
 assert
-  builtins.match ".*--inputmethod .*/bin/plasma-keyboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
+  builtins.match ".*--inputmethod .*/bin/kboard.*" c.services.displayManager.sddm.settings.Wayland.CompositorCommand
   != null;
 assert c.services.pipewire.enable && c.services.pipewire.pulse.enable;
 assert !c.services.shengFirmware.keyboard.enable;
@@ -30,13 +30,16 @@ assert c.services.shengFirmware.enable;
 assert c.services.flatpak.enable;
 assert c.xdg.portal.enable;
 assert
-  builtins.match ".*InputMethod=.*/share/applications/org.kde.plasma.keyboard.desktop.*"
+  builtins.match ".*InputMethod=.*/share/applications/org.devl0rd.kboard.desktop.*"
     c.environment.etc."xdg/kwinrc".text != null;
 assert builtins.elem "flatpak" packages;
 assert builtins.elem "discover" packages;
 assert builtins.elem "plasma-keyboard" packages;
 assert builtins.elem "qtvirtualkeyboard" packages;
-assert builtins.elem "maliit-keyboard" packages;
+assert builtins.elem "kboard" packages;
+assert !(builtins.elem "maliit-keyboard" packages);
+assert builtins.match ".*splitMode=Auto.*" c.environment.etc."xdg/kboardrc".text != null;
+assert builtins.match ".*soundEnabled=false.*" c.environment.etc."xdg/kboardrc".text != null;
 assert builtins.elem "xdg-desktop-portal-kde" (
   builtins.map (p: p.pname or p.name) c.xdg.portal.extraPortals
 );

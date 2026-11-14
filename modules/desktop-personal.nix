@@ -1,6 +1,9 @@
 # Personal single-boot KDE candidate. Existing downloadable images keep their
 # defaults; this profile selects the owner's accessory and application needs.
 { lib, pkgs, ... }:
+let
+  kboard = pkgs.callPackage ../packages/kboard { };
+in
 {
   imports = [
     ./personal-performance.nix
@@ -30,6 +33,7 @@
   services.shengSerialConsole.enable = lib.mkForce false;
 
   services.flatpak.enable = true;
+  sheng.virtualKeyboard.package = kboard;
   # Flatpak's supported static remote mechanism includes the upstream signing
   # key in the image. Adding Flathub does not require network on first boot.
   environment.etc."flatpak/remotes.d/flathub.flatpakrepo".source = ./assets/flathub.flatpakrepo;
@@ -38,7 +42,16 @@
   # for the logged-in KWin session too; user preferences can override this.
   environment.etc."xdg/kwinrc".text = ''
     [Wayland]
-    InputMethod=${pkgs.kdePackages.plasma-keyboard}/share/applications/org.kde.plasma.keyboard.desktop
+    InputMethod=${kboard}/share/applications/org.devl0rd.kboard.desktop
+  '';
+
+  # User preferences override these defaults. The greeter runs as its own user.
+  environment.etc."xdg/kboardrc".text = ''
+    [Look]
+    splitMode=Auto
+
+    [Sound]
+    soundEnabled=false
   '';
 
   # Short device tests favour s2idle over deep's early USB wakeups. This is a
@@ -50,9 +63,8 @@
   services.logind.settings.Login.HandlePowerKey = "suspend";
 
   environment.systemPackages = [
-    # Optional desktop input method; Plasma Keyboard remains the default and
-    # continues to provide the separate SDDM login keyboard.
-    pkgs.maliit-keyboard
+    # Retain KBoard as part of the system generation, including at SDDM.
+    kboard
     pkgs.trace-cmd
     (pkgs.writeShellApplication {
       name = "sheng-power-report";

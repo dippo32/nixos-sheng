@@ -1,0 +1,24 @@
+name: test-kboard-greeter
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate personal desktop and account
+        run: |
+          nix eval --json --impure --option allow-import-from-derivation false \
+            --expr 'import ./tests/personal-kde.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
+          nix eval --json --impure --option allow-import-from-derivation false \
+            --expr 'import ./tests/personal-account.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
