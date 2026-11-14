@@ -227,7 +227,7 @@
             # Optional native applications for a user's Nix profile, not the
             # system image. The project's pinned pkgs permits these unfree apps.
             chatgpt-native = pkgs.chatgpt;
-            antigravity-native = pkgs.antigravity-ide;
+            antigravity-native = pkgs.callPackage ./packages/antigravity-app { };
 
             u-boot = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;

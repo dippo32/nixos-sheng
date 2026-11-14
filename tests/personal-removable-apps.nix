@@ -10,9 +10,12 @@ assert !(builtins.any (name: flake.inputs.nixpkgs.lib.hasPrefix "firefox" name) 
 assert !(builtins.elem "librewolf" names);
 assert builtins.elem "librewolf-bin" names;
 assert !(builtins.elem "antigravity-ide" names);
+assert !(builtins.elem "antigravity-hub" names);
 assert !(builtins.elem "chatgpt" names);
 assert nativeApps.chatgpt-native.pname == "chatgpt";
-assert nativeApps.antigravity-native.pname == "antigravity-ide";
+assert nativeApps.antigravity-native.pname == "antigravity-hub";
+assert nativeApps.antigravity-native.version == "2.32.0";
+assert nativeApps.antigravity-native.buildId == "6141816156848128";
 assert builtins.elem "aarch64-linux" nativeApps.chatgpt-native.meta.platforms;
 assert builtins.elem "aarch64-linux" nativeApps.antigravity-native.meta.platforms;
 assert !(builtins.hasAttr "x-scheme-handler/codex" c.xdg.mime.defaultApplications);

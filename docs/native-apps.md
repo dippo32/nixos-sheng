@@ -2,13 +2,16 @@
 
 The project exposes `chatgpt-native` and `antigravity-native` for
 `aarch64-linux` from the pinned Nixpkgs. They use the Nixpkgs packages for
-ChatGPT Desktop and Antigravity IDE, rather than the project's Flatpak
-wrappers. These outputs do not add either application to the system image.
+ChatGPT Desktop and Antigravity App, rather than the project's Flatpak
+wrappers. Antigravity App is the multi-agent GUI, distinct from Antigravity
+IDE and CLI. These outputs do not add either application to the system image.
 
 Both packages are unfree. The project imports its pinned Nixpkgs with unfree
 packages enabled; a separate Nixpkgs import may have different settings.
 The pinned ChatGPT package uses an official ARM64 OpenAI release, and the
-Antigravity IDE package uses an official ARM64 Google release. Build success
+Antigravity App is pinned to Google's ARM64 release 2.32.0 (build
+6141816156848128), using the pinned Nixpkgs `antigravity-hub` wrapper.
+Its official tarball was fetched and SHA-256 pinned; ARM64 build success
 and correct runtime behaviour on this device have not yet been verified.
 NixOS is not in OpenAI's list of officially supported Linux distributions for
 the ChatGPT preview; consult the vendor's Linux documentation for current
