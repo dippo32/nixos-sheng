@@ -1,0 +1,45 @@
+name: test-early-sensors
+
+on:
+  push:
+    branches: [codex/early-sensors-charger]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Check personal sensor ordering and isolation
+        run: |
+          set -euo pipefail
+          nix eval --json --impure --option allow-import-from-derivation false \
+            --expr 'import ./tests/personal-early-sensors.nix { flake = builtins.getFlake ("git+file://" + toString ./.); }'
+      - name: Exercise representative systemd transaction graph
+        run: |
+          set -euo pipefail
+          nix eval --json --impure --option allow-import-from-derivation false --expr '
+            let
+              f = builtins.getFlake ("git+file://" + toString ./.);
+              c = f.nixosConfigurations.sheng-kde-personal.config;
+              pick = s: {
+                inherit (s) after before wants requires conflicts;
+                defaultDependencies = s.unitConfig.DefaultDependencies or true;
+              };
+            in {
+              registry = (pick c.systemd.services.sheng-sensors-data) // {
+                requiresMountsFor = c.systemd.services.sheng-sensors-data.unitConfig.RequiresMountsFor;
+              };
+              rpc = pick c.systemd.services.adsprpcd-sensorspd;
+              charger = pick c.systemd.services.xiaomi-charger-mode;
+            }
+          ' > /tmp/sheng-early-sensors-units.json
+          python3 tests/early-sensors-graph.py /tmp/sheng-early-sensors-units.json
