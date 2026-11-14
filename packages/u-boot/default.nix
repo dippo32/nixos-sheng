@@ -9,6 +9,7 @@
   version ? "sheng",
   rootPartition ? "userdata",
   directBoot ? false,
+  chargerBoot ? false,
 }:
 
 let
@@ -39,7 +40,7 @@ assert lib.assertMsg (
   patches = [
     ./patches/prefer-abl-memory-layout.patch
     ./patches/fix-fastboot-menu-reboot-mode.patch
-  ];
+  ] ++ lib.optional chargerBoot ./patches/charger-boot-marker.patch;
 
   # The MDSS register sequencing is Zig. Passed as a make variable rather than
   # put on PATH, because nixpkgs' zig hook would replace buildPhase with `zig
