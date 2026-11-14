@@ -44,9 +44,9 @@ jobs:
             if readelf -dW "recovery-tools/$tool" | grep -Fq '(NEEDED)'; then
               echo "$tool unexpectedly requires a shared library" >&2; exit 1
             fi
-            # tune2fs prints its version even though it does not support -V.
-            if [ "$tool" = tune2fs ]; then
-              version=$("recovery-tools/$tool" -V 2>&1 || true)
+            # These two print a version banner but do not implement -V.
+            if [ "$tool" = tune2fs ] || [ "$tool" = resize2fs ]; then
+              version=$("recovery-tools/$tool" 2>&1 || true)
             else
               version=$("recovery-tools/$tool" -V 2>&1)
             fi
