@@ -1,15 +1,16 @@
-name: test-kboard
+name: kboard-output-cache
 
 on:
-  push:
-    branches: [codex/kboard-test]
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
-  build:
+  export:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
@@ -18,5 +19,37 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      - name: Build native keyboard and test split key geometry
-        run: nix build -L .#kboard-native
+      - name: Build and export the pinned output only
+        run: |
+          set -euo pipefail
+          ref='github:dippo32/nixos-sheng/4156114265133500d0616880ed04730c107abe31'
+          attr='packages.aarch64-linux.kboard-native'
+          remote_drv=$(nix eval --raw "$ref#$attr.drvPath")
+          local_drv=$(nix eval --raw ".#$attr.drvPath")
+          remote_out=$(nix eval --raw "$ref#$attr.outPath")
+          local_out=$(nix eval --raw ".#$attr.outPath")
+          test "$remote_drv" = "$local_drv"
+          test "$remote_out" = "$local_out"
+          nix build -L "$ref#kboard-native" -o result
+          test "$(readlink -f result)" = "$remote_out"
+          nix path-info "$remote_out" >/dev/null
+          mkdir -p kboard-output
+          printf '%s\n' '4156114265133500d0616880ed04730c107abe31' > kboard-output/source-commit.txt
+          printf '%s\n' "$remote_drv" > kboard-output/derivation-path.txt
+          printf '%s\n' "$remote_out" > kboard-output/output-path.txt
+          nix-store --query --references "$remote_out" > kboard-output/references.txt
+          nix-store --export "$remote_out" | zstd -T0 -3 -o kboard-output/kboard-output.nar.zst
+          (cd kboard-output && sha256sum kboard-output.nar.zst source-commit.txt derivation-path.txt output-path.txt references.txt > SHA256SUMS)
+      - name: Attest output and checksum manifest
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            kboard-output/kboard-output.nar.zst
+            kboard-output/SHA256SUMS
+      - name: Upload signed and checksummed output
+        uses: actions/upload-artifact@v6
+        with:
+          name: kboard-output-pinned-4156114
+          path: kboard-output/
+          if-no-files-found: error
+          compression-level: 0
