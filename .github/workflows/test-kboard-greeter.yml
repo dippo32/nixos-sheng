@@ -1,6 +1,8 @@
 name: test-kboard-greeter
 
 on:
+  push:
+    branches: [codex/kboard-greeter-candidate]
   workflow_dispatch:
 
 permissions:
