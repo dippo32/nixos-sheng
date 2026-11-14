@@ -1,0 +1,26 @@
+name: test-camera-awb
+
+on:
+  push:
+    branches: [codex/camera-awb-backport]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build patched libcamera and run SoftISP fixtures
+        run: nix build -L --no-link .#libcamera-awb-test

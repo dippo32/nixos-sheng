@@ -229,6 +229,9 @@
             chatgpt-native = pkgs.chatgpt;
             antigravity-native = pkgs.callPackage ./packages/antigravity-app { };
 
+            # Experimental package-only build; not an image or a deployment.
+            libcamera-awb-test = pkgs.libcamera;
+
             u-boot = pkgs.callPackage ./packages/u-boot {
               src = u-boot-src;
               version = u-boot-src.shortRev or "dirty";

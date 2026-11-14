@@ -1,0 +1,199 @@
+From 7ebae537183fbacebf8c3ae9b5e97435b468e3de Mon Sep 17 00:00:00 2001
+From: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+Date: Thu, 29 Oct 2026 01:30:36 +0200
+Subject: [PATCH] libcamera: software_isp: Exclude saturated pixels from AWB
+ statistics
+
+AWB statistics in the software ISP accumulate the value of all pixels to
+calculate per-channel means. Saturated pixels skew those means, as
+clipping gives them a different colour (unless they have a neutral
+colour value and are fully saturated on all colour channels). A large
+number of saturated pixels can have a significant impact on the AWB
+operation and incorrectly shift the hue of the image.
+
+Fix this by accumulating unsaturated pixels only. The saturation level
+is hardcoded to 95% of the maximum value to leave some margin for noise
+and avoid the close-to-saturation non-linearity that can also skew the
+calculated means. It may be possible to improve the implementation by
+calculating the saturation threshold dynamically based on sensor
+characterization and noise level.
+
+Reported-by: Geir Isene <geir@isene.com>
+Reported-by: Martin Neiva de Carvalho <martincarvalho@gmail.com>
+Reported-by: Tobias Predel <tobias.predel@gmail.com>
+Reviewed-by: Hans de Goede <johannes.goede@oss.qualcomm.com>
+Reviewed-by: Milan Zamazal <mzamazal@redhat.com>
+Tested-by: Robert Mader <robert.mader@collabora.com>
+Signed-off-by: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
+Reviewed-by: Kieran Bingham <kieran.bingham@ideasonboard.com>
+Signed-off-by: Kieran Bingham <kieran.bingham@ideasonboard.com>
+
+Backport: libcamera 0.7.2 keeps AWB under src/ipa/simple and uses a
+different process() API. Adapted that part while retaining the previous gains
+when all samples are saturated. Other hunks are unchanged from upstream.
+Upstream: https://github.com/libcamera-org/libcamera/commit/7ebae537183fbacebf8c3ae9b5e97435b468e3de
+
+---
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index d9d0d9b..65d826f 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -15,11 +15,20 @@
+ namespace libcamera {
+ 
+ /**
+- * \brief Struct that holds the statistics for the Software ISP
++ * \brief Statistics for the Software ISP
+  *
+- * The struct value types are large enough to not overflow.
+- * Should they still overflow for some reason, no check is performed and they
+- * wrap around.
++ * The software ISP computes two types of statistics:
++ *
++ * - The accumulator counts the number of non-saturated pixels and sums their
++ *   R, G and B channels individually. Pixels that have any saturated channel
++ *   are skipped as they don't provide accurate colour information due to
++ *   clipping.
++ *
++ * - The histogram groups pixels in bins based on their luminance and counts
++ *   the number of pixels in each bin. Saturated pixels are included.
++ *
++ * The value types are large enough to not overflow. Should they still overflow
++ * for some reason, no check is performed and they wrap around.
+  */
+ struct SwIspStats {
+ 	/**
+@@ -28,9 +37,13 @@ struct SwIspStats {
+ 	 */
+ 	bool valid;
+ 	/**
+-	 * \brief Sums of colour channels of all the sampled pixels
++	 * \brief Sums of colour channels of all the unsaturated pixels
+ 	 */
+ 	RGB<uint64_t> sum_;
++	/**
++	 * \brief Number of unsaturated pixels accumulated in \a sum_
++	 */
++	uint64_t numPixels_;
+ 	/**
+ 	 * \brief Number of bins in the yHistogram
+ 	 */
+diff --git a/src/ipa/simple/algorithms/awb.cpp b/src/ipa/simple/algorithms/awb.cpp
+index 05155c8..8edc5a7 100644
+--- a/src/ipa/simple/algorithms/awb.cpp
++++ b/src/ipa/simple/algorithms/awb.cpp
+@@ -7,7 +7,6 @@
+ 
+ #include "awb.h"
+ 
+-#include <numeric>
+ #include <stdint.h>
+ 
+ #include <libcamera/base/log.h>
+@@ -49,7 +48,6 @@ void Awb::process(IPAContext &context,
+ 		  const SwIspStats *stats,
+ 		  ControlList &metadata)
+ {
+-	const SwIspStats::Histogram &histogram = stats->yHistogram;
+ 	const uint8_t blackLevel = context.activeState.blc.level;
+ 
+ 	metadata.set(controls::ColourGains, { frameContext.gains.r(),
+@@ -58,13 +56,16 @@ void Awb::process(IPAContext &context,
+ 	if (!stats->valid)
+ 		return;
+ 
++	/* Keep the previous gains if all sampled pixels are saturated. */
++	const uint64_t nPixels = stats->numPixels_;
++	if (!nPixels)
++		return;
++
+ 	/*
+ 	 * Black level must be subtracted to get the correct AWB ratios, they
+ 	 * would be off if they were computed from the whole brightness range
+ 	 * rather than from the sensor range.
+ 	 */
+-	const uint64_t nPixels = std::accumulate(
+-		histogram.begin(), histogram.end(), uint64_t(0));
+ 	const uint64_t offset = blackLevel * nPixels;
+ 	const uint64_t minValid = 1;
+ 	/*
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 7fb77ce..7463381 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -167,6 +167,14 @@ SwStatsCpu::SwStatsCpu(const CameraManager &cm)
+ 			<< "Failed to create shared memory for statistics";
+ }
+ 
++/*
++ * Hardcode the AWB stats saturation threshold to 95% of the maximum value.
++ *
++ * \todo Investigate if this should be made dynamic, based on sensor
++ * (non-)linearity and noise level.
++ */
++static constexpr unsigned int kSaturationThreshold = 0.95 * 256;
++
+ static constexpr unsigned int kRedYMul = 77; /* 0.299 * 256 */
+ static constexpr unsigned int kGreenYMul = 150; /* 0.587 * 256 */
+ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+@@ -177,22 +185,29 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+                                           \
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+-	uint64_t sumB = 0;
+-
+-#define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+-	sumR += r;                         \
+-	sumG += g;                         \
+-	sumB += b;                         \
+-                                           \
+-	yVal = r * kRedYMul;               \
+-	yVal += g * kGreenYMul;            \
+-	yVal += b * kBlueYMul;             \
++	uint64_t sumB = 0;                \
++	uint64_t nSamples = 0;
++
++#define SWSTATS_ACCUMULATE_LINE_STATS(div)      \
++	if (r < kSaturationThreshold * (div) && \
++	    g < kSaturationThreshold * (div) && \
++	    b < kSaturationThreshold * (div)) { \
++		sumR += r;                      \
++		sumG += g;                      \
++		sumB += b;                      \
++		nSamples++;                     \
++	}                                       \
++                                                \
++	yVal = r * kRedYMul;                    \
++	yVal += g * kGreenYMul;                 \
++	yVal += b * kBlueYMul;                  \
+ 	stats.yHistogram[yVal * SwIspStats::kYHistogramSize / (256 * 256 * (div))]++;
+ 
+ #define SWSTATS_FINISH_LINE_STATS() \
+ 	stats.sum_.r() += sumR;     \
+ 	stats.sum_.g() += sumG;     \
+-	stats.sum_.b() += sumB;
++	stats.sum_.b() += sumB;     \
++	stats.numPixels_ += nSamples;
+ 
+ void SwStatsCpu::statsBGGR8Line0(const uint8_t *src[], SwIspStats &stats)
+ {
+@@ -391,6 +406,7 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 
+ 	for (auto &s : stats_) {
+ 		s.sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		s.numPixels_ = 0;
+ 		s.yHistogram.fill(0);
+ 	}
+ }
+@@ -408,9 +424,11 @@ void SwStatsCpu::finishFrame(uint32_t frame, uint32_t bufferId)
+ 
+ 	if (valid) {
+ 		sharedStats_->sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		sharedStats_->numPixels_ = 0;
+ 		sharedStats_->yHistogram.fill(0);
+ 		for (const auto &s : stats_) {
+ 			sharedStats_->sum_ += s.sum_;
++			sharedStats_->numPixels_ += s.numPixels_;
+ 			for (unsigned int j = 0; j < SwIspStats::kYHistogramSize; j++)
+ 				sharedStats_->yHistogram[j] += s.yHistogram[j];
+ 		}
