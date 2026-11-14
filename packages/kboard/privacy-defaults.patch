@@ -1,0 +1,705 @@
+--- a/src/config/kboardsettings.kcfg
++++ b/src/config/kboardsettings.kcfg
+@@ -45,7 +45,7 @@
+             <default>Normal</default>
+         </entry>
+         <entry name="nextWordPrediction" type="Bool"><default>true</default></entry>
+-        <entry name="learnWords" type="Bool"><default>true</default></entry>
++        <entry name="learnWords" type="Bool"><default>false</default></entry>
+         <entry name="autoCapitalize" type="Bool"><default>true</default></entry>
+         <entry name="doubleSpacePeriod" type="Bool"><default>true</default></entry>
+         <entry name="smartPunctuation" type="Bool"><default>true</default></entry>
+@@ -72,7 +72,7 @@
+         <entry name="emojiRecentsLimit" type="Int"><default>40</default><min>8</min><max>120</max></entry>
+     </group>
+     <group name="Gif">
+-        <entry name="gifEnabled" type="Bool"><default>true</default></entry>
++        <entry name="gifEnabled" type="Bool"><default>false</default></entry>
+         <entry name="gifContentFilter" type="Enum">
+             <choices><choice name="Off"/><choice name="Low"/><choice name="Medium"/><choice name="High"/></choices>
+             <default>Medium</default>
+@@ -85,16 +85,16 @@
+         <entry name="gifCacheSizeMb" type="Int"><default>64</default><min>8</min><max>1024</max></entry>
+     </group>
+     <group name="Clipboard">
+-        <entry name="clipboardEnabled" type="Bool"><default>true</default></entry>
++        <entry name="clipboardEnabled" type="Bool"><default>false</default></entry>
+         <entry name="clipboardExpiryMinutes" type="Int"><default>60</default><min>0</min><max>10080</max></entry>
+         <entry name="clipboardMaxItems" type="Int"><default>50</default><min>5</min><max>500</max></entry>
+         <entry name="clipboardSuggestChip" type="Bool"><default>true</default></entry>
+         <entry name="clipboardPersist" type="Bool"><default>false</default></entry>
+         <entry name="clipboardPaused" type="Bool"><default>false</default></entry>
+-        <entry name="clipboardImportKlipper" type="Bool"><default>true</default></entry>
++        <entry name="clipboardImportKlipper" type="Bool"><default>false</default></entry>
+     </group>
+     <group name="Voice">
+-        <entry name="voiceEnabled" type="Bool"><default>true</default></entry>
++        <entry name="voiceEnabled" type="Bool"><default>false</default></entry>
+         <entry name="voiceModel" type="String"><default>parakeet-tdt-0.6b-v3-q4_0</default></entry>
+         <entry name="voiceDevice" type="String"><default>auto</default></entry>
+         <entry name="voiceLanguage" type="String"><default>auto</default></entry>
+--- a/src/clipboard/clipboardhistory.h
++++ b/src/clipboard/clipboardhistory.h
+@@ -31,7 +31,7 @@
+     Q_PROPERTY(int pinnedCount READ pinnedCount NOTIFY countChanged)
+     Q_PROPERTY(bool paused READ isPaused WRITE setPaused NOTIFY pausedChanged)
+     Q_PROPERTY(bool enabled READ isEnabled NOTIFY enabledChanged)
+-    Q_PROPERTY(bool watching READ isWatching CONSTANT)
++    Q_PROPERTY(bool watching READ isWatching NOTIFY watchingChanged)
+     Q_PROPERTY(bool klipperConnected READ isKlipperConnected NOTIFY klipperConnectedChanged)
+     Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
+
+@@ -98,12 +98,17 @@
+     void pausedChanged();
+     void enabledChanged();
+     void klipperConnectedChanged();
++    void watchingChanged();
+     void errorStringChanged();
+     void pasted(int row);
+
+ private:
+     void connectSettings();
++    void updateWatching();
+     void startWatching();
++    void stopWatching();
++    void updateKlipper();
++    void discardMemory();
+     void load();
+     bool isValidRow(int row) const { return row >= 0 && row < m_entries.size(); }
+     int findText(const QString &text) const;
+@@ -114,6 +119,7 @@
+     void entriesChanged();
+     void clearExpiringFlags();
+     static bool shouldPersist(const ClipboardEntry &entry);
++    void saveLoadedHistory();
+     void setError(const QString &error);
+     bool reportPaster(bool ok);
+
+@@ -127,6 +133,7 @@
+     ClipboardPaster m_paster;
+     QTimer m_saveTimer;
+     KlipperBridge *m_klipper = nullptr;
++    SystemClipboard *m_systemClipboard = nullptr;
+     bool m_watching = false;
+     QString m_errorString;
+ };
+--- a/src/clipboard/clipboardhistory.cpp
++++ b/src/clipboard/clipboardhistory.cpp
+@@ -29,10 +29,10 @@
+     m_saveTimer.setInterval(250);
+     connect(&m_saveTimer, &QTimer::timeout, this, &ClipboardHistory::saveNow);
+     connectSettings();
+-    load();
+-    if (m_options.watchSystem) {
+-        startWatching();
+-    }
++    if (isEnabled()) {
++        load();
++    }
++    updateWatching();
+ }
+
+ ClipboardHistory::~ClipboardHistory()
+@@ -50,26 +50,103 @@
+         expireDue();
+     });
+     connect(settings, &KBoardSettings::clipboardMaxItemsChanged, this, &ClipboardHistory::enforceLimit);
+-    connect(settings, &KBoardSettings::clipboardPersistChanged, this, &ClipboardHistory::saveNow);
+-    connect(settings, &KBoardSettings::clipboardPausedChanged, this, &ClipboardHistory::pausedChanged);
+-    connect(settings, &KBoardSettings::clipboardEnabledChanged, this, &ClipboardHistory::enabledChanged);
++    connect(settings, &KBoardSettings::clipboardPersistChanged, this, [this] {
++        if (isEnabled()) {
++            saveNow();
++        }
++    });
++    connect(settings, &KBoardSettings::clipboardPausedChanged, this, [this] {
++        updateWatching();
++        Q_EMIT pausedChanged();
++    });
++    connect(settings, &KBoardSettings::clipboardEnabledChanged, this, [this] {
++        if (isEnabled()) {
++            load();
++        } else {
++            stopWatching();
++            discardMemory();
++        }
++        updateWatching();
++        Q_EMIT enabledChanged();
++    });
++    connect(settings, &KBoardSettings::clipboardImportKlipperChanged, this, &ClipboardHistory::updateKlipper);
++}
++
++void ClipboardHistory::updateWatching()
++{
++    if (!m_options.watchSystem || !isEnabled() || isPaused()) {
++        stopWatching();
++        return;
++    }
++    if (!m_systemClipboard) {
++        startWatching();
++    }
++    updateKlipper();
+ }
+
+ void ClipboardHistory::startWatching()
+ {
+-    auto system = new SystemClipboard(this);
+-    m_watching = system->start();
++    m_systemClipboard = new SystemClipboard(this);
++    m_watching = m_systemClipboard->start();
+     if (!m_watching) {
+-        setError(system->errorString());
+-    }
+-    m_paster.setSystemClipboard(system);
+-    connect(system, &SystemClipboard::copied, this, &ClipboardHistory::addMimeData);
+-
++        setError(m_systemClipboard->errorString());
++    }
++    Q_EMIT watchingChanged();
++    m_paster.setSystemClipboard(m_systemClipboard);
++    connect(m_systemClipboard, &SystemClipboard::copied, this, &ClipboardHistory::addMimeData);
++}
++
++void ClipboardHistory::stopWatching()
++{
++    const bool hadKlipper = m_klipper != nullptr;
++    delete m_klipper;
++    m_klipper = nullptr;
++    m_paster.setSystemClipboard(nullptr);
++    delete m_systemClipboard;
++    m_systemClipboard = nullptr;
++    if (m_watching) {
++        m_watching = false;
++        Q_EMIT watchingChanged();
++    }
++    if (hadKlipper) {
++        Q_EMIT klipperConnectedChanged();
++    }
++}
++
++void ClipboardHistory::updateKlipper()
++{
++    if (!m_options.watchSystem || !isEnabled() || isPaused() || !KBoardSettings::clipboardImportKlipper()) {
++        if (m_klipper) {
++            delete m_klipper;
++            m_klipper = nullptr;
++            Q_EMIT klipperConnectedChanged();
++        }
++        return;
++    }
++    if (m_klipper) {
++        return;
++    }
+     m_klipper = new KlipperBridge(this);
+     connect(m_klipper, &KlipperBridge::connectedChanged, this, &ClipboardHistory::klipperConnectedChanged);
+     connect(m_klipper, &KlipperBridge::historyReceived, this, &ClipboardHistory::mergeKlipperHistory);
+-    connect(KBoardSettings::self(), &KBoardSettings::clipboardImportKlipperChanged, m_klipper, [this] { m_klipper->fetch(false); });
+     m_klipper->fetch(false);
++}
++
++void ClipboardHistory::discardMemory()
++{
++    // Flush pending user changes before dropping in-memory history. Keep
++    // already-saved or pinned history on disk for a later opt-in.
++    if (m_saveTimer.isActive()) {
++        saveLoadedHistory();
++    }
++    m_images.waitForWrites();
++    m_latest.forget(m_latest.id());
++    beginResetModel();
++    m_entries.clear();
++    endResetModel();
++    m_images.clearMemory();
++    m_expiry.schedule(m_entries);
++    Q_EMIT countChanged();
+ }
+
+ int ClipboardHistory::rowCount(const QModelIndex &parent) const
+@@ -105,6 +182,9 @@
+
+ bool ClipboardHistory::addMimeData(const QMimeData *mime)
+ {
++    if (!ClipboardGuard::isRecording()) {
++        return false;
++    }
+     const ClipboardDetect::CopiedContent content = ClipboardDetect::read(mime);
+     if (content.secret) {
+         m_guard.block(content.text);
+@@ -145,6 +225,9 @@
+
+ void ClipboardHistory::mergeKlipperHistory(const QStringList &history, bool onlyNewest)
+ {
++    if (!ClipboardGuard::isRecording() || !KBoardSettings::clipboardImportKlipper()) {
++        return;
++    }
+     const QStringList items = onlyNewest ? history.mid(0, 1) : history;
+     for (const QString &text : std::views::reverse(items)) {
+         const bool accepted = m_guard.allowsImport(text) && findText(text) < 0 && (!onlyNewest || m_guard.allowsCopy(text));
+@@ -245,6 +328,10 @@
+
+ void ClipboardHistory::expireDue()
+ {
++    if (!isEnabled()) {
++        m_expiry.schedule({});
++        return;
++    }
+     const ClipboardExpiry::Sweep sweep = m_expiry.sweep(m_entries);
+     for (int row : sweep.expiring) {
+         m_entries[row].expiring = true;
+@@ -260,6 +347,15 @@
+ }
+
+ void ClipboardHistory::saveNow()
++{
++    m_saveTimer.stop();
++    if (!isEnabled()) {
++        return;
++    }
++    saveLoadedHistory();
++}
++
++void ClipboardHistory::saveLoadedHistory()
+ {
+     m_saveTimer.stop();
+     QList<ClipboardEntry> persisted;
+--- a/src/clipboard/clipboardimagestore.h
++++ b/src/clipboard/clipboardimagestore.h
+@@ -24,6 +24,7 @@
+     QImage image(const QString &id, bool thumbnail) const;
+     void persist(const QString &id);
+     void drop(const QString &id);
++    void clearMemory();
+     void prune(const QSet<QString> &keep);
+     void waitForWrites();
+
+--- a/src/clipboard/clipboardimagestore.cpp
++++ b/src/clipboard/clipboardimagestore.cpp
+@@ -130,6 +130,13 @@
+     }));
+ }
+
++void ClipboardImageStore::clearMemory()
++{
++    // Keep disk files intact; they can be loaded again if recording is enabled.
++    const QMutexLocker locker(&m_mutex);
++    m_records.clear();
++}
++
+ void ClipboardImageStore::drop(const QString &id)
+ {
+     {
+--- a/src/typing/userstore.h
++++ b/src/typing/userstore.h
+@@ -17,7 +17,9 @@
+     const UserModel &model() const;
+
+     QString open(const QString &language, const QByteArray &data);
++    QString openFromDisk(const QString &language);
+     void close();
++    void discard();
+     void markChanged();
+     void flush();
+
+--- a/src/typing/userstore.cpp
++++ b/src/typing/userstore.cpp
+@@ -89,6 +89,31 @@
+     return QStringLiteral("Learned words file had an unknown format and was moved to %1").arg(moved);
+ }
+
++QString UserStore::openFromDisk(const QString &language)
++{
++    close();
++    const QString path = pathFor(language);
++    QFile file(path);
++    QByteArray data;
++    if (file.exists()) {
++        if (!file.open(QIODevice::ReadOnly)) {
++            return QStringLiteral("Cannot read learned words %1: %2").arg(path, file.errorString());
++        }
++        data = file.readAll();
++    }
++    return open(language, data);
++}
++
++void UserStore::discard()
++{
++    // Stop unsaved changes and wait for already-started writes before returning.
++    m_saveTimer.stop();
++    m_dirty = false;
++    savePool()->waitForDone();
++    m_model.clear();
++    m_language.clear();
++}
++
+ void UserStore::close()
+ {
+     flush();
+--- a/src/typing/languagedata.cpp
++++ b/src/typing/languagedata.cpp
+@@ -63,14 +63,9 @@
+     if (!result.error.isEmpty()) {
+         return result;
+     }
+-    QFile userFile(source.userModelPath);
+-    if (userFile.exists()) {
+-        if (!userFile.open(QIODevice::ReadOnly)) {
+-            result.error = QStringLiteral("Cannot read learned words %1: %2").arg(source.userModelPath, userFile.errorString());
+-            return result;
+-        }
+-        result.userData = userFile.readAll();
+-    }
++    // User history is loaded separately on the owning thread only if learning
++    // is still enabled, so an in-flight dictionary load cannot read it after
++    // the user disables learning.
+     result.data = std::move(data);
+     return result;
+ }
+--- a/src/typing/typingengine.cpp
++++ b/src/typing/typingengine.cpp
+@@ -23,9 +23,20 @@
+     connect(settings, &KBoardSettings::activeLayoutChanged, this, &TypingEngine::startLoading);
+     for (auto signal :
+         {&KBoardSettings::suggestionsChanged, &KBoardSettings::autocorrectChanged, &KBoardSettings::nextWordPredictionChanged,
+-            &KBoardSettings::autoCapitalizeChanged, &KBoardSettings::textExpansionsChanged, &KBoardSettings::learnWordsChanged}) {
++            &KBoardSettings::autoCapitalizeChanged, &KBoardSettings::textExpansionsChanged}) {
+         connect(settings, signal, this, &TypingEngine::recompute);
+     }
++    connect(settings, &KBoardSettings::learnWordsChanged, this, [this, settings] {
++        if (settings->learnWords()) {
++            if (m_data) {
++                setError(m_store.openFromDisk(m_data->language));
++            }
++        } else {
++            m_store.discard();
++        }
++        Q_EMIT learnedWordsChanged();
++        recompute();
++    });
+     startLoading();
+ }
+
+@@ -185,7 +196,7 @@
+     }
+     const QString language = LocaleResolver::languageOf(locale);
+     m_store.flush();
+-    m_loader.load(LanguageSource {locale, language, UserStore::pathFor(language)});
++    m_loader.load(LanguageSource {locale, language, QString()});
+ }
+
+ void TypingEngine::applyLoad(const LanguageLoad &result)
+@@ -195,8 +206,13 @@
+         setError(result.error);
+         return;
+     }
+-    setError(m_store.open(result.data->language, result.userData));
+     m_data = result.data;
++    if (KBoardSettings::self()->learnWords()) {
++        setError(m_store.openFromDisk(m_data->language));
++    } else {
++        m_store.discard();
++        setError(QString());
++    }
+     if (m_language != m_data->language) {
+         m_language = m_data->language;
+         Q_EMIT languageChanged();
+--- a/src/typing/typingenginelearning.cpp
++++ b/src/typing/typingenginelearning.cpp
+@@ -107,7 +107,7 @@
+ void TypingEngine::learn(const QString &word)
+ {
+     QString form = TextAnalysis::stripPunctuation(word.trimmed());
+-    if (!m_data || form.isEmpty() || form.size() > MaxLearnLength) {
++    if (!KBoardSettings::self()->learnWords() || !m_data || form.isEmpty() || form.size() > MaxLearnLength) {
+         return;
+     }
+     form = TextAnalysis::normalizeApostrophes(form);
+@@ -118,7 +118,7 @@
+ void TypingEngine::forget(const QString &word)
+ {
+     const QString key = TextAnalysis::normalizeKey(TextAnalysis::stripPunctuation(word.trimmed()));
+-    if (!m_data || key.isEmpty()) {
++    if (!KBoardSettings::self()->learnWords() || !m_data || key.isEmpty()) {
+         return;
+     }
+     m_store.model().forget(key);
+@@ -148,6 +148,9 @@
+
+ void TypingEngine::clearLearned()
+ {
++    if (!KBoardSettings::self()->learnWords()) {
++        return;
++    }
+     m_store.model().clear();
+     clearLastCorrection();
+     learnedChanged();
+@@ -156,11 +159,14 @@
+
+ bool TypingEngine::exportLearned(const QString &filePath) const
+ {
+-    return m_store.exportWords(filePath);
++    return KBoardSettings::self()->learnWords() && m_store.exportWords(filePath);
+ }
+
+ int TypingEngine::importLearned(const QString &filePath)
+ {
++    if (!KBoardSettings::self()->learnWords()) {
++        return -1;
++    }
+     const int imported = m_store.importWords(filePath);
+     if (imported > 0) {
+         learnedChanged();
+--- a/tests/clipboard/clipboardhistorytest.cpp
++++ b/tests/clipboard/clipboardhistorytest.cpp
+@@ -2,7 +2,10 @@
+ #include "clipboarddetect.h"
+ #include "clipboardroles.h"
+ #include "kboardsettings.h"
+-
++#include "klipperbridge.h"
++#include "systemclipboard.h"
++
++#include <QDBusConnection>
+ #include <QFile>
+ #include <QMimeData>
+ #include <QSignalSpy>
+@@ -18,6 +21,30 @@
+ constexpr qint64 s_minute = 60;
+ }
+
++class FakeKlipper : public QObject
++{
++    Q_OBJECT
++    Q_CLASSINFO("D-Bus Interface", "org.kde.klipper.klipper")
++public:
++    int historyCalls = 0;
++    int currentCalls = 0;
++public Q_SLOTS:
++    QStringList getClipboardHistoryMenu() { ++historyCalls; return {QStringLiteral("fake history")}; }
++    QString getClipboardContents() { ++currentCalls; return QStringLiteral("fake current"); }
++Q_SIGNALS:
++    void clipboardHistoryUpdated();
++};
++
++class CountingMimeData : public QMimeData
++{
++public:
++    mutable int calls = 0;
++    bool hasFormat(const QString &) const override { ++calls; return false; }
++    QStringList formats() const override { ++calls; return {}; }
++protected:
++    QVariant retrieveData(const QString &, QMetaType) const override { ++calls; return {}; }
++};
++
+ class ClipboardHistoryTest : public QObject
+ {
+     Q_OBJECT
+@@ -48,6 +75,8 @@
+     void init()
+     {
+         KBoardSettings::self()->setDefaults();
++        KBoardSettings::setClipboardEnabled(true);
++        KBoardSettings::setClipboardImportKlipper(true);
+         m_dir = std::make_unique<QTemporaryDir>();
+         QVERIFY(m_dir->isValid());
+         m_now = QDateTime(QDate(2026, 9, 18), QTime(12, 0), QTimeZone::UTC);
+@@ -271,6 +300,123 @@
+         QCOMPARE(history->count(), 1);
+     }
+
++    void disablingStopsSourcesAndPreservesSavedHistory()
++    {
++        {
++            auto previous = makeHistory();
++            QVERIFY(previous->addText(QStringLiteral("saved before startup")));
++            previous->pin(0, true);
++            previous->saveNow();
++        }
++        KBoardSettings::setClipboardEnabled(false);
++        ClipboardHistory::Options options;
++        options.dataDirectory = m_dir->filePath(QStringLiteral("data"));
++        options.cacheDirectory = m_dir->filePath(QStringLiteral("cache"));
++        options.watchSystem = true;
++        auto history = std::make_unique<ClipboardHistory>(options);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 0);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 0);
++        QCOMPARE(history->count(), 0); // Existing history is not loaded when disabled.
++        QVERIFY(!history->addText(QStringLiteral("disabled")));
++        CountingMimeData mime;
++        QVERIFY(!history->addMimeData(&mime));
++        QCOMPARE(mime.calls, 0);
++
++        KBoardSettings::setClipboardEnabled(true);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 1);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 1);
++        QCOMPARE(history->count(), 1);
++        QCOMPARE(history->entryAt(0).text, QStringLiteral("saved before startup"));
++        history->clear(true);
++        QVERIFY(history->addText(QStringLiteral("pinned")));
++        history->pin(0, true);
++        history->saveNow();
++        QVERIFY(QFile::exists(history->historyFile()));
++        const QByteArray saved = [&] { QFile f(history->historyFile()); f.open(QIODevice::ReadOnly); return f.readAll(); }();
++        QVERIFY(!saved.isEmpty());
++
++        KBoardSettings::setClipboardImportKlipper(false);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 0);
++        history->mergeKlipperHistory({QStringLiteral("late reply")}, false);
++        QCOMPARE(history->count(), 1);
++        KBoardSettings::setClipboardEnabled(false);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 0);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 0);
++        QCOMPARE(history->count(), 0);
++        QVERIFY(history->latest().isEmpty());
++        QVERIFY(!history->expiry().isActive());
++        // Changes and explicitly invoked persistence while off cannot clobber
++        // the unloaded pinned history or schedule an expiry.
++        KBoardSettings::setClipboardPersist(true);
++        history->saveNow();
++        KBoardSettings::setClipboardExpiryMinutes(1);
++        history->expireDue();
++        KBoardSettings::setClipboardPersist(false);
++        QVERIFY(!history->expiry().isActive());
++        QTimer::singleShot(0, history.get(), [&history] {
++            history->mergeKlipperHistory({QStringLiteral("late reply")}, false);
++        });
++        QCoreApplication::processEvents();
++        QCOMPARE(history->count(), 0);
++        QFile file(history->historyFile());
++        QVERIFY(file.open(QIODevice::ReadOnly));
++        QCOMPARE(file.readAll(), saved);
++
++        KBoardSettings::setClipboardEnabled(true);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 1);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 0);
++        QCOMPARE(history->count(), 1);
++        QCOMPARE(history->entryAt(0).text, QStringLiteral("pinned"));
++        KBoardSettings::setClipboardImportKlipper(true);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 1);
++        history->setPaused(true);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 0);
++        QCOMPARE(history->findChildren<KlipperBridge *>().size(), 0);
++        history->setPaused(false);
++        QCOMPARE(history->findChildren<SystemClipboard *>().size(), 1);
++    }
++
++    void noKlipperCallsWhileDisabled()
++    {
++        auto bus = QDBusConnection::sessionBus();
++        if (!bus.isConnected()) {
++            QSKIP("requires a private D-Bus session (dbus-run-session)");
++        }
++        if (!bus.registerService(QStringLiteral("org.kde.klipper"))) {
++            QSKIP("requires an isolated session without a running Klipper");
++        }
++        struct Unregister {
++            QDBusConnection bus;
++            ~Unregister() { bus.unregisterObject(QStringLiteral("/klipper")); bus.unregisterService(QStringLiteral("org.kde.klipper")); }
++        } unregister {bus};
++        FakeKlipper fake;
++        QVERIFY(bus.registerObject(QStringLiteral("/klipper"), &fake,
++            QDBusConnection::ExportAllSlots | QDBusConnection::ExportAllSignals));
++        KBoardSettings::setClipboardImportKlipper(false);
++        KBoardSettings::setClipboardEnabled(false);
++        ClipboardHistory::Options options;
++        options.dataDirectory = m_dir->filePath(QStringLiteral("dbus-data"));
++        options.cacheDirectory = m_dir->filePath(QStringLiteral("dbus-cache"));
++        options.watchSystem = true;
++        auto history = std::make_unique<ClipboardHistory>(options);
++        QTest::qWait(100);
++        QCOMPARE(fake.historyCalls, 0);
++        QCOMPARE(fake.currentCalls, 0);
++        KBoardSettings::setClipboardEnabled(true);
++        QTest::qWait(100);
++        QCOMPARE(fake.historyCalls, 0); // Import was not enabled.
++        KBoardSettings::setClipboardImportKlipper(true);
++        QTRY_VERIFY_WITH_TIMEOUT(fake.historyCalls > 0, 2000);
++        KBoardSettings::setClipboardEnabled(false);
++        const int historyCount = fake.historyCalls;
++        const int currentCount = fake.currentCalls;
++        Q_EMIT fake.clipboardHistoryUpdated();
++        QTest::qWait(100);
++        QCOMPARE(fake.historyCalls, historyCount);
++        QCOMPARE(fake.currentCalls, currentCount);
++        QCOMPARE(history->count(), 0);
++    }
++
+     void latestChip()
+     {
+         auto history = makeHistory();
+--- a/tests/clipboard/CMakeLists.txt
++++ b/tests/clipboard/CMakeLists.txt
+@@ -2,7 +2,7 @@
+
+ ecm_add_test(clipboardhistorytest.cpp
+     TEST_NAME clipboardhistorytest
+-    LINK_LIBRARIES Qt::Test Qt::Gui KBoardClipboard KBoardConfig
++    LINK_LIBRARIES Qt::Test Qt::Gui Qt::DBus KBoardClipboard KBoardConfig
+ )
+ set_tests_properties(clipboardhistorytest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+--- a/tests/typing/typingtestsupport.cpp
++++ b/tests/typing/typingtestsupport.cpp
+@@ -60,6 +60,7 @@
+ void resetSettings()
+ {
+     KBoardSettings::self()->setDefaults();
++    KBoardSettings::setLearnWords(true);
+ }
+
+ std::unique_ptr<TypingEngine> readyEngine()
+--- a/tests/typing/predictiontest.cpp
++++ b/tests/typing/predictiontest.cpp
+@@ -2,6 +2,9 @@
+ #include "kboardsettings.h"
+ #include "typingengine.h"
+ #include "typingtestsupport.h"
++#include "userstore.h"
++
++#include <QFile>
+
+ #include <QTemporaryDir>
+ #include <QTest>
+@@ -19,6 +22,7 @@
+     void basePredictions();
+     void learnsPhrases();
+     void learningRespectsSettings();
++    void disabledLearningDoesNotReadOrOverwriteHistory();
+     void forgetBlocksWord();
+     void persistsLearnedWords();
+     void exportImport();
+@@ -129,6 +133,35 @@
+     QVERIFY(!m_engine->isLearned(QStringLiteral("zorblat")));
+ }
+
++void PredictionTest::disabledLearningDoesNotReadOrOverwriteHistory()
++{
++    m_engine->learn(QStringLiteral("PrivacyFixtureWord"));
++    m_engine->flush();
++    const QString path = UserStore::pathFor(m_engine->language());
++    QFile file(path);
++    QVERIFY(file.open(QIODevice::ReadOnly));
++    const QByteArray original = file.readAll();
++    file.close();
++    QVERIFY(!original.isEmpty());
++
++    KBoardSettings::self()->setLearnWords(false);
++    QVERIFY(!m_engine->isLearned(QStringLiteral("PrivacyFixtureWord")));
++    m_engine->learn(QStringLiteral("DisabledWord"));
++    m_engine->forget(QStringLiteral("PrivacyFixtureWord"));
++    m_engine->clearLearned();
++    m_engine->flush();
++    auto second = TypingTest::readyEngine();
++    QVERIFY(second->isReady());
++    QVERIFY(!second->isLearned(QStringLiteral("PrivacyFixtureWord")));
++    QVERIFY(file.open(QIODevice::ReadOnly));
++    QCOMPARE(file.readAll(), original);
++    file.close();
++
++    KBoardSettings::self()->setLearnWords(true);
++    QVERIFY(m_engine->isLearned(QStringLiteral("PrivacyFixtureWord")));
++    QVERIFY(second->isLearned(QStringLiteral("PrivacyFixtureWord")));
++}
++
+ void PredictionTest::forgetBlocksWord()
+ {
+     QVERIFY(m_engine->completionsFor(QStringLiteral("tomor")).contains(QStringLiteral("tomorrow")));
