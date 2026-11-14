@@ -21,8 +21,7 @@ is retained until a device test verifies the replacement.
   This does not establish successful login or UI/device integration.
 - Charger userspace, systemd unit verification and the optional boot image
   passed [run 43569205450](https://github.com/dippo32/nixos-sheng/actions/runs/43569205450).
-  The normal boot derivation remained equal to the baseline; the candidate
-  boot image has not yet been tested on the tablet.
+  The normal boot derivation remained equal to the baseline.
 - The final image build passed in
   [run 43570628913](https://github.com/dippo32/nixos-sheng/actions/runs/43570628913)
   from source commit `8a1a79c`. Its ARM64 job took 19 minutes 17 seconds.
@@ -78,6 +77,20 @@ when early detection fails, restores the backlight before normal boot, and asks
 systemd to perform shutdown after confirmed unplug. Mock tests cannot establish
 actual charging, power consumption, temperature or key/firmware behavior.
 
+On 2026-11-14 the candidate booted normally from slot B and was tested after
+power-off and charger insertion. The owner observed the charging screen, a
+battery increase from 96% to 97%, a short Power press blanking and restoring
+the screen, and a long press continuing into NixOS. The service journal
+corroborated the long-press exit. MiPPS authentication was skipped after a VDM
+timeout; this test does not establish maximum charging power. The screen did
+not blank automatically in this generation.
+
+An automatic screen timeout and authentication-error handling were built and
+passed 16 mocked tests in [run 43580952938](https://github.com/dippo32/nixos-sheng/actions/runs/43580952938).
+The candidate generation was registered for the next boot, but the screen
+timeout has not yet been tested on the tablet. Synchronous charger
+authentication can delay the timer and Power handling while it runs.
+
 ## Device validation still required
 
 1. Verify normal reboot and the recovery path after account provisioning and
@@ -87,8 +100,8 @@ actual charging, power consumption, temperature or key/firmware behavior.
    windows, including sign-in, link handling and persistence.
 3. Test on-screen keyboard sizing, automatic display/hiding, rotation and lock
    screen; retain an alternative control path.
-4. Measure battery charging and suspend on the running system, then test the
-   charger boot candidate temporarily, including Power escape and unplug.
+4. Test the newly registered automatic charger-screen timeout, unplug behavior,
+   charger authentication and charging power; measure suspend separately.
 5. Compare camera sensors, focus controls, selected resolution and color in the
    same conditions before changing calibration or claiming improved quality.
 
